@@ -1,11 +1,16 @@
 import { Picker } from '@react-native-picker/picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function AusenciasScreen() {
   const [colaborador, setColaborador] = useState('');
   const [tipoAusencia, setTipoAusencia] = useState('Falta');
+  
+  // NOVOS ESTADOS PARA O ATESTADO
+  const [dataAtestado, setDataAtestado] = useState('');
+  const [diasAtestado, setDiasAtestado] = useState('');
+  const [cidAtestado, setCidAtestado] = useState('');
   
   const [listaColaboradores, setListaColaboradores] = useState<any[]>([]);
   const [salvando, setSalvando] = useState(false);
@@ -33,6 +38,13 @@ export default function AusenciasScreen() {
       return Alert.alert("Aviso", "Selecione o colaborador e o tipo de ausência!");
     }
 
+    // Trava de segurança para atestados
+    if (tipoAusencia === 'Atestado') {
+      if (!dataAtestado || !diasAtestado || !cidAtestado) {
+        return Alert.alert("Aviso", "Preencha a data, os dias e a CID do atestado médico!");
+      }
+    }
+
     setSalvando(true);
 
     // O Segredo: Enviamos os campos de localização vazios e o dinheiro zerado!
@@ -44,7 +56,11 @@ export default function AusenciasScreen() {
       ramal: '-', 
       quantidade: 0,
       valor_unitario: 0,
-      valor_total: 0
+      valor_total: 0,
+      // Salva os dados do atestado (Se não for atestado, manda vazio/nulo)
+      data_atestado: tipoAusencia === 'Atestado' ? dataAtestado : null,
+      dias_atestado: tipoAusencia === 'Atestado' ? parseInt(diasAtestado) : null,
+      cid_atestado: tipoAusencia === 'Atestado' ? cidAtestado : null
     }]);
 
     setSalvando(false);
@@ -53,8 +69,11 @@ export default function AusenciasScreen() {
       Alert.alert("Erro ao salvar", error.message);
     } else {
       Alert.alert("✅ Sucesso!", `${tipoAusencia} registrada para ${colaborador} com sucesso!`);
-      // Limpa para o próximo
+      // Limpa para o próximo lançamento
       setColaborador('');
+      setDataAtestado('');
+      setDiasAtestado('');
+      setCidAtestado('');
     }
   };
 
@@ -91,6 +110,43 @@ export default function AusenciasScreen() {
                 <Picker.Item label="Aviso Prévio / Folga" value="Folga" />
               </Picker>
             </View>
+
+            {/* SEÇÃO DINÂMICA: SÓ APARECE SE FOR ATESTADO */}
+            {tipoAusencia === 'Atestado' && (
+              <View style={styles.atestadoBox}>
+                <Text style={styles.atestadoTitulo}>Detalhes do Atestado 🏥</Text>
+                
+                <Text style={styles.label}>Data do Atestado:</Text>
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Ex: 15/04/2026" 
+                  value={dataAtestado} 
+                  onChangeText={setDataAtestado} 
+                />
+
+                <View style={styles.row}>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Dias de Duração:</Text>
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Ex: 3" 
+                      keyboardType="numeric" 
+                      value={diasAtestado} 
+                      onChangeText={setDiasAtestado} 
+                    />
+                  </View>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Código CID:</Text>
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Ex: J01.9" 
+                      value={cidAtestado} 
+                      onChangeText={setCidAtestado} 
+                    />
+                  </View>
+                </View>
+              </View>
+            )}
 
             {/* CAIXA DE AVISO VISUAL */}
             <View style={[styles.avisoBox, tipoAusencia === 'Falta' ? styles.avisoFalta : styles.avisoAtestado]}>
@@ -134,9 +190,18 @@ const styles = StyleSheet.create({
   pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden' },
   picker: { height: 50, width: '100%', borderWidth: 0, backgroundColor: 'transparent' },
   
+  // NOVOS ESTILOS PARA INPUTS
+  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#F8FAFC', color: '#2C3E50', height: 50 },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  col: { width: '48%' },
+  
+  // CAIXA DE DESTAQUE DO ATESTADO
+  atestadoBox: { backgroundColor: '#EBF5FB', padding: 15, borderRadius: 10, marginTop: 15, borderWidth: 1, borderColor: '#AED6F1' },
+  atestadoTitulo: { fontSize: 16, fontWeight: 'bold', color: '#2980B9', marginBottom: 5, textAlign: 'center' },
+
   avisoBox: { padding: 15, borderRadius: 8, marginTop: 20, borderWidth: 1 },
   avisoFalta: { backgroundColor: '#FDEDEC', borderColor: '#E74C3C' },
-  avisoAtestado: { backgroundColor: '#EBF5FB', borderColor: '#3498DB' },
+  avisoAtestado: { backgroundColor: '#E8F8F5', borderColor: '#27AE60' }, // Mudei a cor do aviso do atestado para verde
   avisoTexto: { color: '#2C3E50', fontSize: 14, textAlign: 'center', fontWeight: '500' },
 
   button: { padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 25 },

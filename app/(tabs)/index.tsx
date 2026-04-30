@@ -1,8 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Necessário instalar: npx expo install @react-native-async-storage/async-storage
 import { Picker } from '@react-native-picker/picker';
-import { decode } from 'base64-arraybuffer'; // Para converter a imagem pro Supabase
-import * as ImagePicker from 'expo-image-picker'; // IMPORTANDO A CÂMERA
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function HomeScreen() {
@@ -16,11 +15,6 @@ export default function HomeScreen() {
   const [quantidade, setQuantidade] = useState('');
   const [valorTotalCalculado, setValorTotalCalculado] = useState(0);
   
-  // ESTADOS DA FOTO
-  const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
-  const [tirandoFoto, setTirandoFoto] = useState(false);
-  
   const [listaColaboradores, setListaColaboradores] = useState<any[]>([]);
   const [listaServicos, setListaServicos] = useState<any[]>([]);
   const [mapaCompleto, setMapaCompleto] = useState<any[]>([]);
@@ -28,10 +22,30 @@ export default function HomeScreen() {
   const [quadrasDisponiveis, setQuadrasDisponiveis] = useState<string[]>([]);
   const [ramaisDisponiveis, setRamaisDisponiveis] = useState<any[]>([]);
   const [limitePes, setLimitePes] = useState<number | null>(null);
+  
   const [salvando, setSalvando] = useState(false);
   const [carregandoDados, setCarregandoDados] = useState(true);
+  const [dataHoraAtual, setDataHoraAtual] = useState(new Date());
 
-  useEffect(() => { carregarDadosBase(); }, []);
+  // NOVOS ESTADOS PARA MODO OFFLINE
+  const [lancamentosPendentes, setLancamentosPendentes] = useState<any[]>([]);
+  const [sincronizando, setSincronizando] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => setDataHoraAtual(new Date()), 1000);
+    carregarDadosBase();
+    carregarLancamentosLocais(); // Carrega o que está guardado no celular
+    return () => clearInterval(timer);
+  }, []);
+
+  const carregarLancamentosLocais = async () => {
+    try {
+      const dados = await AsyncStorage.getItem('@lancamentos_off');
+      if (dados) setLancamentosPendentes(JSON.parse(dados));
+    } catch (e) {
+      console.log("Erro ao carregar dados locais");
+    }
+  };
 
   const carregarDadosBase = async () => {
     setCarregandoDados(true);
@@ -78,84 +92,80 @@ export default function HomeScreen() {
   const handleMudancaQuantidade = (texto: string) => {
     const valorDigitado = parseInt(texto) || 0;
     if (limitePes !== null && valorDigitado > limitePes) {
-      alert(`⚠️ Bloqueado: Este ramal tem um limite máximo de ${limitePes} pés!`);
+      alert(`⚠️ Limite do ramal é ${limitePes} pés!`);
       setQuantidade(limitePes.toString());
     } else setQuantidade(texto);
   };
 
-  // FUNÇÃO DE ABRIR A CÂMERA
-  const abrirCamera = async () => {
-    const permissao = await ImagePicker.requestCameraPermissionsAsync();
-    if (permissao.status === 'granted') {
-      setTirandoFoto(true);
-      const resultado = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, // Deixa cortar a foto quadrada
-        aspect: [4, 3],
-        quality: 0.3, // Reduz qualidade pra salvar rápido no 4G da roça
-        base64: true, // Transforma a foto em código pra subir pro Supabase
-      });
-
-      if (!resultado.canceled) {
-        setFotoUri(resultado.assets[0].uri);
-        setFotoBase64(resultado.assets[0].base64 || null);
-      }
-      setTirandoFoto(false);
-    } else {
-      Alert.alert("Permissão negada", "O aplicativo precisa da câmera para a assinatura visual.");
-    }
-  };
-
+  // FUNÇÃO DE SALVAMENTO OFFLINE (NO CELULAR)
   const salvarLancamento = async () => {
     if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade) {
-      return alert("Por favor, preencha todos os campos obrigatórios!");
+      return Alert.alert("Aviso", "Preencha todos os campos!");
     }
     
-    // Trava de segurança: Exige a foto!
-    if (!fotoBase64) {
-      return alert("⚠️ É obrigatório tirar a foto do colaborador para registrar o lançamento!");
+    const ramalInfo = ramaisDisponiveis.find(r => r.ramal === ramal);
+    
+    if (ramalInfo?.servico_permitido && servico !== ramalInfo.servico_permitido) {
+      return Alert.alert("❌ Bloqueado", `Este ramal só aceita: ${ramalInfo.servico_permitido}`);
+    }
+
+    if (ramalInfo?.data_bloqueio) {
+      const hojeISO = dataHoraAtual.toISOString().split('T')[0];
+      if (hojeISO !== ramalInfo.data_bloqueio) {
+        return Alert.alert("📅 Data Bloqueada", `Lançamentos permitidos apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`);
+      }
     }
 
     setSalvando(true);
-
-    let urlFotoSalva = null;
-
-    // 1. SOBE A FOTO PRO STORAGE DO SUPABASE
-    try {
-      const nomeArquivo = `${colaborador.replace(/\s+/g, '')}_${Date.now()}.jpg`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('assinaturas')
-        .upload(nomeArquivo, decode(fotoBase64), { contentType: 'image/jpeg' });
-
-      if (uploadError) throw uploadError;
-
-      // Pega o link público da foto que acabou de subir
-      const { data: urlData } = supabase.storage.from('assinaturas').getPublicUrl(nomeArquivo);
-      urlFotoSalva = urlData.publicUrl;
-      
-    } catch (e) {
-      setSalvando(false);
-      return alert("Erro ao salvar a foto. Tente novamente.");
-    }
-
-    // 2. SALVA O LANÇAMENTO COM O LINK DA FOTO
     let valorUnitario = servicoSelecionadoCompleto.preco_base || 0;
     if (servicoSelecionadoCompleto.tipo_cobranca === 'milheiro') valorUnitario = valorUnitario / 1000;
 
-    const { error } = await supabase.from('diarios_campo').insert([{ 
-      colaborador, servico, fazenda, quadra, ramal, 
-      quantidade: parseInt(quantidade),
-      valor_unitario: valorUnitario,
+    // Criamos o objeto do lançamento
+    const novoLancamento = {
+      colaborador, 
+      servico, 
+      fazenda, 
+      quadra, 
+      ramal, 
+      quantidade: parseInt(quantidade), 
+      valor_unitario: valorUnitario, 
       valor_total: valorTotalCalculado,
-      foto_assinatura: urlFotoSalva // <--- SALVANDO O LINK DA FOTO NO BANCO!
-    }]);
+      data: dataHoraAtual.toISOString() 
+    };
 
-    setSalvando(false);
-    if (error) alert("Erro ao salvar: " + error.message);
-    else {
-      alert("✅ Lançamento e Foto salvos com sucesso!");
-      setRamal(''); setQuantidade(''); setValorTotalCalculado(0); 
-      setFotoUri(null); setFotoBase64(null); // Limpa a foto da tela
+    try {
+      // Salva na lista pendente local
+      const novaLista = [...lancamentosPendentes, novoLancamento];
+      await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
+      setLancamentosPendentes(novaLista);
+
+      Alert.alert("✅ Salvo no Celular", "Lançamento registrado offline. Lembre-se de sincronizar ao final do dia!");
+      setRamal(''); setQuantidade(''); setValorTotalCalculado(0);
+    } catch (e) {
+      Alert.alert("Erro", "Não foi possível salvar no armazenamento interno.");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  // FUNÇÃO PARA ENVIAR TUDO PRO SUPABASE (QUANDO TIVER INTERNET)
+  const sincronizarComBanco = async () => {
+    if (lancamentosPendentes.length === 0) return;
+
+    setSincronizando(true);
+    try {
+      const { error } = await supabase.from('diarios_campo').insert(lancamentosPendentes);
+
+      if (error) throw error;
+
+      // Se deu certo, limpa o celular
+      await AsyncStorage.removeItem('@lancamentos_off');
+      setLancamentosPendentes([]);
+      Alert.alert("🚀 Sincronizado!", "Todos os lançamentos foram enviados para o servidor.");
+    } catch (e: any) {
+      Alert.alert("Erro na Sincronização", "Verifique sua conexão: " + e.message);
+    } finally {
+      setSincronizando(false);
     }
   };
 
@@ -163,29 +173,47 @@ export default function HomeScreen() {
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={styles.header}>
         <Text style={styles.title}>Axoryn Campo 🚜</Text>
-        <Text style={styles.subtitle}>Lançamento de Produção</Text>
+        <Text style={styles.subtitle}>Registro de Produção Diária</Text>
+        
+        <View style={styles.relogioBox}>
+            <Text style={styles.relogioTexto}>
+                {dataHoraAtual.toLocaleDateString('pt-BR')} - {dataHoraAtual.toLocaleTimeString('pt-BR')}
+            </Text>
+            <Text style={styles.relogioAviso}>MODO OFFLINE ATIVO</Text>
+        </View>
       </View>
+
+      {/* BOTÃO DE SINCRONIZAÇÃO (APARECE SÓ SE TIVER DADOS) */}
+      {lancamentosPendentes.length > 0 && (
+        <View style={styles.syncCard}>
+          <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} lançamentos pendentes</Text>
+          <TouchableOpacity 
+            style={styles.btnSync} 
+            onPress={sincronizarComBanco}
+            disabled={sincronizando}
+          >
+            {sincronizando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSyncTexto}>SINCRONIZAR COM O BANCO</Text>}
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.card}>
         {carregandoDados ? (
-          <ActivityIndicator size="large" color="#27AE60" style={{marginVertical: 20}}/>
+          <ActivityIndicator size="large" color="#27AE60" />
         ) : (
           <>
             <Text style={styles.label}>Colaborador:</Text>
             <View style={styles.pickerContainer}>
               <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
-                <Picker.Item label="Selecione..." value="" />
+                <Picker.Item label="Quem está trabalhando?" value="" />
                 {listaColaboradores.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
               </Picker>
             </View>
 
             <Text style={styles.label}>Serviço:</Text>
             <View style={styles.pickerContainer}>
-              <Picker selectedValue={servico} onValueChange={(itemValue) => {
-                  setServico(itemValue);
-                  setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === itemValue) || null);
-                }} style={styles.picker}>
-                <Picker.Item label="Selecione..." value="" />
+              <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
+                <Picker.Item label="Qual o serviço?" value="" />
                 {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
               </Picker>
             </View>
@@ -193,63 +221,34 @@ export default function HomeScreen() {
             <Text style={styles.label}>Fazenda:</Text>
             <View style={styles.pickerContainer}>
               <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
-                <Picker.Item label="Selecione..." value="" />
-                {fazendasDisponiveis.map((faz, idx) => (<Picker.Item key={idx} label={faz} value={faz} />))}
+                <Picker.Item label="Selecione a fazenda..." value="" />
+                {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
               </Picker>
             </View>
 
             <View style={styles.row}>
               <View style={styles.col}>
                 <Text style={styles.label}>Quadra:</Text>
-                <View style={[styles.pickerContainer, !fazenda ? styles.disabled : null]}>
-                  <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
-                    <Picker.Item label="..." value="" />
-                    {quadrasDisponiveis.map((q, idx) => (<Picker.Item key={idx} label={q} value={q} />))}
-                  </Picker>
-                </View>
+                <View style={[styles.pickerContainer, !fazenda && styles.disabled]}><Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}><Picker.Item label="..." value="" />{quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}</Picker></View>
               </View>
-
               <View style={styles.col}>
                 <Text style={styles.label}>Ramal:</Text>
-                <View style={[styles.pickerContainer, !quadra ? styles.disabled : null]}>
-                  <Picker enabled={!!quadra} selectedValue={ramal} onValueChange={setRamal} style={styles.picker}>
-                    <Picker.Item label="..." value="" />
-                    {ramaisDisponiveis.map((r, idx) => (<Picker.Item key={idx} label={r.ramal} value={r.ramal} />))}
-                  </Picker>
-                </View>
+                <View style={[styles.pickerContainer, !quadra && styles.disabled]}><Picker enabled={!!quadra} selectedValue={ramal} onValueChange={setRamal} style={styles.picker}><Picker.Item label="..." value="" />{ramaisDisponiveis.map((r, i) => (<Picker.Item key={i} label={r.ramal} value={r.ramal} />))}</Picker></View>
               </View>
             </View>
 
-            <Text style={styles.label}>Quantidade (Qtd):</Text>
-            <TextInput 
-              style={[styles.input, !ramal ? styles.disabledInput : null]} 
-              placeholder="Ex: 1000" keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} 
-            />
+            <Text style={styles.label}>Quantidade (Pés):</Text>
+            <TextInput style={[styles.input, !ramal && styles.disabledInput]} placeholder="0" keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} />
 
             {valorTotalCalculado > 0 && (
-              <Text style={styles.valorTexto}>Gerado: R$ {valorTotalCalculado.toFixed(2).replace('.', ',')}</Text>
+              <View style={styles.cardGanho}>
+                <Text style={styles.textoGanho}>Valor deste lançamento:</Text>
+                <Text style={styles.valorGanho}>R$ {valorTotalCalculado.toFixed(2).replace('.', ',')}</Text>
+              </View>
             )}
 
-            {/* SEÇÃO DA CÂMERA */}
-            <View style={styles.cameraBox}>
-              <Text style={styles.label}>Assinatura Visual (Foto do Funcionário):</Text>
-              
-              {fotoUri ? (
-                <View style={{alignItems: 'center'}}>
-                  <Image source={{ uri: fotoUri }} style={styles.fotoPreview} />
-                  <TouchableOpacity onPress={abrirCamera} style={styles.btnTirarFotoNova}>
-                    <Text style={styles.btnTirarFotoTexto}>📸 Tirar Outra Foto</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity onPress={abrirCamera} style={styles.btnCamera}>
-                  <Text style={styles.btnCameraTexto}>📸 Abrir Câmera</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <TouchableOpacity style={[styles.button, salvando ? styles.buttonDisabled : null]} onPress={salvarLancamento} disabled={salvando}>
-              {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 Salvar Produção</Text>}
+            <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
+              {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR NO CELULAR</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -262,26 +261,30 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7FA', padding: 20 },
   header: { marginBottom: 20, marginTop: 20, alignItems: 'center' },
   title: { fontSize: 28, fontWeight: 'bold', color: '#2C3E50' },
-  subtitle: { fontSize: 16, color: '#7F8C8D', marginTop: 5 },
+  subtitle: { fontSize: 16, color: '#7F8C8D' },
+  relogioBox: { backgroundColor: '#34495E', padding: 10, borderRadius: 8, marginTop: 15, alignItems: 'center', width: '100%' },
+  relogioTexto: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  relogioAviso: { color: '#F1C40F', fontSize: 9, fontWeight: 'bold', marginTop: 3 },
+  
+  // ESTILO DO CARD DE SINCRONIZAÇÃO
+  syncCard: { backgroundColor: '#F39C12', padding: 15, borderRadius: 12, marginBottom: 20, alignItems: 'center' },
+  syncTexto: { color: '#FFF', fontWeight: 'bold', marginBottom: 10 },
+  btnSync: { backgroundColor: '#FFF', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  btnSyncTexto: { color: '#F39C12', fontWeight: 'bold' },
+
   card: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 15, elevation: 5 },
   label: { fontSize: 14, fontWeight: '700', color: '#34495E', marginBottom: 5, marginTop: 15 },
   pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden' },
-  picker: { height: 50, width: '100%', borderWidth: 0, backgroundColor: 'transparent' },
+  picker: { height: 50, width: '100%' },
   disabled: { backgroundColor: '#EAECEE', opacity: 0.6 },
-  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#F8FAFC', color: '#2C3E50', height: 50 },
-  disabledInput: { backgroundColor: '#EAECEE', color: '#999' },
+  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 55 },
+  disabledInput: { backgroundColor: '#EAECEE' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '48%' },
-  valorTexto: { color: '#1E8449', fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginTop: 15 },
-  
-  cameraBox: { marginTop: 20, padding: 15, backgroundColor: '#F9E79F', borderRadius: 10, borderWidth: 1, borderColor: '#F1C40F' },
-  btnCamera: { backgroundColor: '#D4AC0D', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 10 },
-  btnCameraTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  fotoPreview: { width: 150, height: 150, borderRadius: 10, marginTop: 10, borderWidth: 2, borderColor: '#2C3E50' },
-  btnTirarFotoNova: { marginTop: 10 },
-  btnTirarFotoTexto: { color: '#D4AC0D', fontWeight: 'bold', textDecorationLine: 'underline' },
-
-  button: { backgroundColor: '#27AE60', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 25 },
+  cardGanho: { backgroundColor: '#E8F8F5', padding: 15, borderRadius: 10, marginTop: 20, alignItems: 'center', borderLeftWidth: 5, borderLeftColor: '#27AE60' },
+  textoGanho: { color: '#1E8449', fontSize: 13, fontWeight: 'bold' },
+  valorGanho: { color: '#1E8449', fontSize: 24, fontWeight: '900' },
+  button: { backgroundColor: '#2980B9', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 25 },
   buttonDisabled: { backgroundColor: '#95A5A6' },
   buttonText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
 });
