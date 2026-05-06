@@ -129,7 +129,7 @@ export default function MapaScreen() {
                           <View key={r.id || idx} style={styles.ramalItem}>
                             
                             {/* COLUNA ESQUERDA: RAMAL E SERVIÇO */}
-                            <View style={{ flex: 1, paddingRight: 10 }}>
+                            <View style={{ flex: 1.5, paddingRight: 10 }}>
                               <Text style={styles.ramalTexto}>↳ Ramal {r.ramal}</Text>
                               
                               <Text style={styles.miniLabel}>Serviço Vinculado:</Text>
@@ -211,12 +211,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#D4E6F1', 
     borderRadius: 6, 
     marginTop: 4, 
-    height: 40, 
+    height: 50, 
     justifyContent: 'center', 
     overflow: 'hidden' 
   },
   miniPicker: { 
-    height: 40, 
+    height: 50, 
     color: '#2980B9',
     width: '100%',
     fontWeight: 'bold'

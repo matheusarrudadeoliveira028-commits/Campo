@@ -1,13 +1,14 @@
 import { Picker } from '@react-native-picker/picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function EquipesScreen() {
   const [fiscais, setFiscais] = useState<any[]>([]);
-  const [todosColaboradores, setTodosColaboradores] = useState<any[]>([]);
+  const [fiscalSelecionado, setFiscalSelecionado] = useState('');
+  const [colaboradores, setColaboradores] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
-  const [fiscalSelecionado, setFiscalSelecionado] = useState<number | null>(null);
+  const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
     carregarDados();
@@ -15,133 +16,136 @@ export default function EquipesScreen() {
 
   const carregarDados = async () => {
     setCarregando(true);
-    // Busca quem é Fiscal
-    const { data: dataFiscais } = await supabase
-      .from('colaboradores')
-      .select('*')
-      .eq('cargo', 'Fiscal')
+    // Puxa quem é Fiscal, Supervisor, Encarregado OU Administrador (para você poder testar)
+    const { data: fiscaisData } = await supabase
+      .from('perfis')
+      .select('id, nome')
+      .in('cargo', ['Fiscal de Campo', 'Supervisor', 'Encarregado', 'Administrador'])
       .order('nome');
+      
+    if (fiscaisData) setFiscais(fiscaisData);
 
-    // Busca todos os Colaboradores
-    const { data: dataColabs } = await supabase
+    // Puxa todos os colaboradores
+    const { data: colabData } = await supabase
       .from('colaboradores')
-      .select('*')
-      .eq('cargo', 'Colaborador')
+      .select('id, nome, fiscal_id')
       .order('nome');
-
-    if (dataFiscais) setFiscais(dataFiscais);
-    if (dataColabs) setTodosColaboradores(dataColabs);
+      
+    if (colabData) setColaboradores(colabData);
     setCarregando(false);
   };
 
-  const vincularAoFiscal = async (colaboradorId: number, novoFiscalId: any) => {
+  // Função para vincular ou desvincular o peão do fiscal
+  const alternarVinculo = async (colabId: string, fiscalAtualId: string | null) => {
+    if (!fiscalSelecionado) {
+      return Alert.alert('Aviso', 'Primeiro selecione um Fiscal no topo da tela!');
+    }
+
+    // Se ele já for desse fiscal, vamos desvincular (colocar null). Se não, vinculamos ao fiscal selecionado.
+    const novoFiscalId = fiscalAtualId === fiscalSelecionado ? null : fiscalSelecionado;
+
+    setSalvando(true);
     const { error } = await supabase
       .from('colaboradores')
-      .update({ fiscal_id: novoFiscalId === 'nenhum' ? null : novoFiscalId })
-      .eq('id', colaboradorId);
+      .update({ fiscal_id: novoFiscalId })
+      .eq('id', colabId);
 
     if (error) {
-      Alert.alert("Erro", "Não foi possível atualizar a equipe.");
+      // AQUI ESTÁ A LUPA! Vai mostrar o erro exato na tela e no terminal:
+      console.log("ERRO AO SALVAR:", error); 
+      Alert.alert('Erro no Banco de Dados', error.message);
     } else {
-      carregarDados(); // Recarrega a visão
+      // Atualiza a lista na tela sem precisar recarregar o banco todo
+      setColaboradores(colaboradores.map(c => 
+        c.id === colabId ? { ...c, fiscal_id: novoFiscalId } : c
+      ));
     }
+    setSalvando(false);
   };
 
-  // Filtra a equipe para a visão de "Equipe por Equipe"
-  const equipeAtual = todosColaboradores.filter(c => c.fiscal_id === fiscalSelecionado);
-
   return (
-    <ScrollView style={styles.container}>
+    <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Gestão de Equipes 👥</Text>
-        <Text style={styles.subtitle}>Vincule colaboradores aos Fiscais</Text>
+        <Text style={styles.title}>Montar Equipes 👥</Text>
+        <Text style={styles.subtitle}>Vincule os funcionários aos fiscais</Text>
       </View>
 
-      {carregando ? (
-        <ActivityIndicator size="large" color="#2980B9" />
-      ) : (
-        <>
-          {/* SELETOR DE VISÃO POR FISCAL */}
-          <View style={styles.cardFiltro}>
-            <Text style={styles.label}>Filtrar Visão por Fiscal:</Text>
-            <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={fiscalSelecionado}
-                onValueChange={(item) => setFiscalSelecionado(item)}
-              >
-                <Picker.Item label="Ver todos os colaboradores..." value={null} />
-                {fiscais.map(f => (
-                  <Picker.Item key={f.id} label={`📂 Equipe: ${f.nome}`} value={f.id} />
-                ))}
-              </Picker>
-            </View>
-          </View>
+      <View style={styles.card}>
+        <Text style={styles.label}>1. Selecione o Fiscal Líder:</Text>
+        <View style={styles.pickerContainer}>
+          <Picker selectedValue={fiscalSelecionado} onValueChange={setFiscalSelecionado}>
+            <Picker.Item label="Escolha um Fiscal..." value="" />
+            {fiscais.map(f => (
+              <Picker.Item key={f.id} label={f.nome} value={f.id} />
+            ))}
+          </Picker>
+        </View>
+      </View>
 
-          {/* LISTAGEM DE COLABORADORES */}
-          <Text style={styles.sectionTitle}>
-            {fiscalSelecionado ? `Membros da Equipe (${equipeAtual.length})` : "Todos os Colaboradores"}
-          </Text>
-
-          {(fiscalSelecionado ? equipeAtual : todosColaboradores).map((colab) => (
-            <View key={colab.id} style={styles.colabCard}>
-              <View>
-                <Text style={styles.colabNome}>{colab.nome}</Text>
-                <Text style={styles.colabStatus}>
-                  {colab.fiscal_id 
-                    ? `Responsável: ${fiscais.find(f => f.id === colab.fiscal_id)?.nome || 'Fiscal'}` 
-                    : '⚠️ Sem fiscal vinculado'}
-                </Text>
-              </View>
-
-              <View style={styles.vincularBox}>
-                <Text style={styles.miniLabel}>Mudar Fiscal:</Text>
-                <View style={styles.miniPicker}>
-                  <Picker
-                    selectedValue={colab.fiscal_id}
-                    onValueChange={(valor) => vincularAoFiscal(colab.id, valor)}
-                    style={{ height: 40 }}
-                  >
-                    <Picker.Item label="Nenhum" value="nenhum" />
-                    {fiscais.map(f => (
-                      <Picker.Item key={f.id} label={f.nome} value={f.id} />
-                    ))}
-                  </Picker>
-                </View>
-              </View>
-            </View>
-          ))}
+      {fiscalSelecionado ? (
+        <ScrollView style={styles.listaContainer} contentContainerStyle={{ paddingBottom: 50 }}>
+          <Text style={styles.label}>2. Selecione a equipe dele:</Text>
           
-          {fiscalSelecionado && equipeAtual.length === 0 && (
-            <Text style={styles.vazio}>Nenhum colaborador nesta equipe ainda.</Text>
-          )}
-        </>
+          {carregando || salvando ? <ActivityIndicator size="large" color="#27AE60" style={{marginTop: 20}} /> : null}
+
+          {colaboradores.map((colab) => {
+            const isNaMinhaEquipe = colab.fiscal_id === fiscalSelecionado;
+            const isEmOutraEquipe = colab.fiscal_id && colab.fiscal_id !== fiscalSelecionado;
+
+            return (
+              <TouchableOpacity 
+                key={colab.id} 
+                style={[
+                  styles.colabRow, 
+                  isNaMinhaEquipe && styles.colabRowAtivo,
+                  isEmOutraEquipe && styles.colabRowOcupado
+                ]}
+                onPress={() => alternarVinculo(colab.id, colab.fiscal_id)}
+                disabled={salvando}
+              >
+                <View>
+                  <Text style={[styles.colabNome, isNaMinhaEquipe && styles.textoAtivo]}>{colab.nome}</Text>
+                  {isEmOutraEquipe && <Text style={styles.textoOcupado}>⚠️ Já está em outra equipe</Text>}
+                </View>
+                
+                <View style={[styles.checkbox, isNaMinhaEquipe && styles.checkboxAtivo]}>
+                  {isNaMinhaEquipe && <Text style={styles.checkIcon}>✓</Text>}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      ) : (
+        <View style={styles.avisoBox}>
+          <Text style={styles.avisoTexto}>👆 Selecione um fiscal acima para ver e montar a equipe dele.</Text>
+        </View>
       )}
-      <View style={{height: 80}} />
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F4F7', padding: 20 },
-  header: { marginTop: 30, marginBottom: 20 },
+  header: { marginTop: 10, marginBottom: 20, alignItems: 'center' },
   title: { fontSize: 26, fontWeight: 'bold', color: '#2C3E50' },
   subtitle: { fontSize: 14, color: '#7F8C8D' },
-  cardFiltro: { backgroundColor: '#34495E', padding: 15, borderRadius: 12, marginBottom: 25 },
-  label: { color: '#BDC3C7', fontSize: 12, fontWeight: 'bold', marginBottom: 5 },
-  pickerContainer: { backgroundColor: '#FFF', borderRadius: 8, overflow: 'hidden' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#2C3E50', marginBottom: 15 },
-  colabCard: { 
-    backgroundColor: '#FFF', 
-    padding: 15, 
-    borderRadius: 10, 
-    marginBottom: 10, 
-    elevation: 3,
-    flexDirection: 'column'
-  },
-  colabNome: { fontSize: 18, fontWeight: 'bold', color: '#34495E' },
-  colabStatus: { fontSize: 12, color: '#27AE60', marginTop: 2 },
-  vincularBox: { marginTop: 15, borderTopWidth: 1, borderTopColor: '#F2F4F4', paddingTop: 10 },
-  miniLabel: { fontSize: 11, color: '#95A5A6', fontWeight: 'bold' },
-  miniPicker: { borderWidth: 1, borderColor: '#D5DBDB', borderRadius: 5, marginTop: 5, backgroundColor: '#FBFCFC' },
-  vazio: { textAlign: 'center', marginTop: 20, color: '#95A5A6', fontStyle: 'italic' }
+  card: { backgroundColor: '#FFF', padding: 20, borderRadius: 15, elevation: 5, marginBottom: 15 },
+  label: { fontSize: 16, fontWeight: 'bold', color: '#34495E', marginBottom: 10 },
+  pickerContainer: { borderWidth: 1, borderColor: '#D5DBDB', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden' },
+  listaContainer: { flex: 1, backgroundColor: '#FFF', padding: 20, borderRadius: 15, elevation: 5 },
+  
+  colabRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#E0E6ED', marginBottom: 10, backgroundColor: '#F8FAFC' },
+  colabRowAtivo: { borderColor: '#27AE60', backgroundColor: '#E8F8F5' },
+  colabRowOcupado: { opacity: 0.6, backgroundColor: '#EAEDED' },
+  
+  colabNome: { fontSize: 16, fontWeight: 'bold', color: '#34495E' },
+  textoAtivo: { color: '#1E8449' },
+  textoOcupado: { fontSize: 12, color: '#E67E22', marginTop: 3 },
+  
+  checkbox: { width: 28, height: 28, borderRadius: 6, borderWidth: 2, borderColor: '#BDC3C7', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF' },
+  checkboxAtivo: { backgroundColor: '#27AE60', borderColor: '#27AE60' },
+  checkIcon: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  avisoBox: { flex: 1, justifyContent: 'center', alignItems: 'center', opacity: 0.5 },
+  avisoTexto: { fontSize: 16, color: '#34495E', textAlign: 'center', paddingHorizontal: 20 }
 });
