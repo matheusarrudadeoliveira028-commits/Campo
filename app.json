@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "axoryn-campo",
+    "name": "Axoryn Campo",
     "slug": "axoryn-campo",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,9 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "br.com.axoryntech.axoryncampo"
     },
     "android": {
+      "package": "br.com.axoryntech.axoryncampo",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -27,6 +29,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O Brekaz Produção precisa acessar a câmera para realizar a auditoria visual (Prova de Vida) da equipe no campo."
+        }
+      ],
       [
         "expo-splash-screen",
         {

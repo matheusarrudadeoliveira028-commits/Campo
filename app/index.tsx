@@ -79,7 +79,7 @@ export default function LoginScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.logoBox}>
-        <Text style={styles.logoText}>Axoryn Campo 🚜</Text>
+        <Text style={styles.logoText}>Brekaz Produção </Text>
         <Text style={styles.subText}>Sistema de Gestão Agrícola</Text>
       </View>
 

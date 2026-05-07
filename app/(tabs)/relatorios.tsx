@@ -9,7 +9,7 @@ export default function RelatoriosScreen() {
   const [colaboradorSelecionado, setColaboradorSelecionado] = useState('');
   const [encarregado, setEncarregado] = useState('Mario Rodrigues Valentin');
   
-  // NOVOS ESTADOS PARA AS DATAS
+  // DATAS
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
 
@@ -56,156 +56,174 @@ export default function RelatoriosScreen() {
 
     setGerando(true);
 
-    // Começa a montar a busca no banco
-    let query = supabase.from('diarios_campo').select('*')
-      .gte('data', `${dtInicioBD} 00:00:00`)
-      .lte('data', `${dtFimBD} 23:59:59`)
-      .order('data', { ascending: true });
+    try {
+      // 1. Busca todos os lançamentos
+      let query = supabase.from('diarios_campo').select('*')
+        .gte('data', `${dtInicioBD} 00:00:00`)
+        .lte('data', `${dtFimBD} 23:59:59`)
+        .order('data', { ascending: true });
 
-    // Se não for "TODOS", filtra por nome
-    if (colaboradorSelecionado !== 'TODOS') {
-      query = query.eq('colaborador', colaboradorSelecionado);
-    }
+      if (colaboradorSelecionado !== 'TODOS') {
+        query = query.eq('colaborador', colaboradorSelecionado);
+      }
 
-    const { data: lancamentos, error } = await query;
+      const { data: lancamentos, error: errLanc } = await query;
+      if (errLanc) throw errLanc;
 
-    if (error) {
-      setGerando(false);
-      return Alert.alert('Erro', 'Não foi possível buscar a produção: ' + error.message);
-    }
+      if (!lancamentos || lancamentos.length === 0) {
+        setGerando(false);
+        return Alert.alert('Aviso', 'Nenhum lançamento encontrado neste período.');
+      }
 
-    if (!lancamentos || lancamentos.length === 0) {
-      setGerando(false);
-      return Alert.alert('Aviso', 'Nenhum lançamento encontrado neste período.');
-    }
+      // 2. Busca o histórico de férias (MÁGICA NOVA AQUI)
+      const { data: feriasDB } = await supabase.from('ferias').select('*');
 
-    // AGRUPAR POR COLABORADOR (Mágica para fazer várias páginas)
-    const agrupadoPorColaborador = lancamentos.reduce((acc: any, item: any) => {
-      if (!acc[item.colaborador]) acc[item.colaborador] = [];
-      acc[item.colaborador].push(item);
-      return acc;
-    }, {});
+      const estaDeFerias = (nome: string, dataLancamento: string) => {
+        const dataFormatada = dataLancamento.split('T')[0];
+        return feriasDB?.some(f => 
+          f.colaborador_nome === nome && 
+          dataFormatada >= f.data_inicio && 
+          dataFormatada <= f.data_fim
+        );
+      };
 
-    const colaboradoresNomes = Object.keys(agrupadoPorColaborador);
-    let paginasHTML = '';
+      // 3. AGRUPAMENTO DUPLO (Por Colaborador E Por Tipo - Registrado/Diária)
+      const agrupado = lancamentos.reduce((acc: any, item: any) => {
+        const tipoFolha = estaDeFerias(item.colaborador, item.data) ? 'Diaria' : 'Registrado';
+        const chaveAgrupamento = `${item.colaborador}_${tipoFolha}`;
 
-    colaboradoresNomes.forEach((nomeColab, index) => {
-      const lancamentosColab = agrupadoPorColaborador[nomeColab];
-      const totalGeral = lancamentosColab.reduce((soma: number, item: any) => soma + (item.valor_total || 0), 0);
+        if (!acc[chaveAgrupamento]) {
+          acc[chaveAgrupamento] = {
+            nome: item.colaborador,
+            tipo: tipoFolha,
+            registros: []
+          };
+        }
+        acc[chaveAgrupamento].registros.push(item);
+        return acc;
+      }, {});
 
-      let linhasTabela = '';
-      lancamentosColab.forEach((item: any) => {
-        const dataObj = new Date(item.data);
-        const dia = dataObj.getDate().toString().padStart(2, '0');
-        const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
-        const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
+      // 4. Gera as páginas HTML
+      const chavesFolhas = Object.keys(agrupado);
+      let paginasHTML = '';
 
-        linhasTabela += `
-          <tr>
-            <td>${dia}</td>
-            <td>${item.servico}</td>
-            <td>${item.fazenda}</td>
-            <td>${item.quadra}</td>
-            <td>${item.ramal}</td>
-            <td>${item.quantidade}</td>
-            <td>${valorUni}</td>
-            <td>R$ ${valorTot}</td>
-          </tr>
+      chavesFolhas.forEach((chave, index) => {
+        const folha = agrupado[chave];
+        const totalGeral = folha.registros.reduce((soma: number, item: any) => soma + (item.valor_total || 0), 0);
+
+        let linhasTabela = '';
+        folha.registros.forEach((item: any) => {
+          const dataObj = new Date(item.data);
+          const dia = dataObj.getDate().toString().padStart(2, '0');
+          const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
+          const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
+
+          linhasTabela += `
+            <tr>
+              <td>${dia}</td>
+              <td>${item.servico}</td>
+              <td>${item.fazenda}</td>
+              <td>${item.quadra}</td>
+              <td>${item.ramal}</td>
+              <td>${item.quantidade}</td>
+              <td>${valorUni}</td>
+              <td>R$ ${valorTot}</td>
+            </tr>
+          `;
+        });
+
+        // HTML de UMA PÁGINA
+        const pagina = `
+          <div class="page-container">
+            <div class="header-container">
+              <div class="header-left">
+                <p>Período: <strong>${dataInicio} até ${dataFim}</strong></p>
+                <p>Encarregado: <strong>${encarregado}</strong></p>
+                <p>Produção: <strong style="${folha.tipo === 'Diaria' ? 'color: #E74C3C; text-transform: uppercase;' : ''}">${folha.tipo}</strong></p>
+                <p>Colaborador: <strong style="font-size: 16px; text-transform: uppercase;">${folha.nome}</strong></p>
+              </div>
+              <div class="header-right">
+                <p><strong>Luiz Felipe Areovaldo Calhim Manoel Abud</strong></p>
+                <p>Fazenda Acauã s/n Bairro Pirambóia</p>
+                <p>Anhembi SP Cep 18.620-000</p>
+                <p>Tel: (14) 3361-7492/3361-9274 Escritório</p>
+              </div>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 8%;">Dia</th>
+                  <th style="width: 25%;">Serviço</th>
+                  <th style="width: 15%;">Fazenda</th>
+                  <th style="width: 10%;">Quadra</th>
+                  <th style="width: 10%;">Ramal</th>
+                  <th style="width: 12%;">Qtd</th>
+                  <th style="width: 10%;">Valor</th>
+                  <th style="width: 10%;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${linhasTabela}
+              </tbody>
+            </table>
+
+            <div class="footer-container">
+              <div>
+                <p style="margin-top: 40px; font-size: 12px; font-style: italic;">declaro ter recebido os valores acima</p>
+              </div>
+              <div class="footer-totals">
+                <p>Total: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
+                <p>Vale: <strong>R$ _________</strong></p>
+                <p style="font-size: 18px;">A receber: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
+              </div>
+            </div>
+
+            <div class="signature-area">
+              <hr style="width: 300px; border: 1px solid #000;">
+              <p style="font-size: 14px; font-weight: bold;">Assinatura do Colaborador</p>
+            </div>
+          </div>
+          ${index < chavesFolhas.length - 1 ? '<div class="quebra-pagina"></div>' : ''}
         `;
+
+        paginasHTML += pagina;
       });
 
-      // HTML de UMA PÁGINA (Um funcionário)
-      const pagina = `
-        <div class="page-container">
-          <div class="header-container">
-            <div class="header-left">
-              <p>Período: <strong>${dataInicio} até ${dataFim}</strong></p>
-              <p>Encarregado: <strong>${encarregado}</strong></p>
-              <p>Produção: <strong>Registrado</strong></p>
-              <p>Colaborador: <strong style="font-size: 16px; text-transform: uppercase;">${nomeColab}</strong></p>
-            </div>
-            <div class="header-right">
-              <p><strong>Luiz Felipe Areovaldo Calhim Manoel Abud</strong></p>
-              <p>Fazenda Acauã s/n Bairro Pirambóia</p>
-              <p>Anhembi SP Cep 18.620-000</p>
-              <p>Tel: (14) 3361-7492/3361-9274 Escritório</p>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 8%;">Dia</th>
-                <th style="width: 25%;">Serviço</th>
-                <th style="width: 15%;">Fazenda</th>
-                <th style="width: 10%;">Quadra</th>
-                <th style="width: 10%;">Ramal</th>
-                <th style="width: 12%;">Qtd</th>
-                <th style="width: 10%;">Valor</th>
-                <th style="width: 10%;">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${linhasTabela}
-            </tbody>
-          </table>
-
-          <div class="footer-container">
-            <div>
-              <p style="margin-top: 40px; font-size: 12px; font-style: italic;">declaro ter recebido os valores acima</p>
-            </div>
-            <div class="footer-totals">
-              <p>Total: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
-              <p>Vale: <strong>R$ _________</strong></p>
-              <p style="font-size: 18px;">A receber: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
-            </div>
-          </div>
-
-          <div class="signature-area">
-            <hr style="width: 300px; border: 1px solid #000;">
-            <p style="font-size: 14px; font-weight: bold;">Assinatura do Colaborador</p>
-          </div>
-        </div>
-        ${index < colaboradoresNomes.length - 1 ? '<div class="quebra-pagina"></div>' : ''}
+      const htmlCompleto = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <style>
+              @page { margin: 15mm; size: A4; }
+              body { font-family: 'Arial', sans-serif; font-size: 13px; color: #000; background-color: #FFF; margin: 0; padding: 0; }
+              .quebra-pagina { page-break-after: always; }
+              .header-container { display: flex; justify-content: space-between; margin-bottom: 25px; border-bottom: 2px solid #000; padding-bottom: 15px; }
+              .header-left p, .header-right p { margin: 4px 0; font-size: 14px; }
+              .header-right { text-align: right; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+              th, td { border: 1px solid #000; padding: 8px 4px; text-align: center; font-size: 12px; }
+              th { background-color: #E8E8E8; font-weight: bold; text-transform: uppercase; }
+              tr:nth-child(even) { background-color: #F9F9F9; }
+              .footer-container { display: flex; justify-content: space-between; margin-top: 30px; }
+              .footer-totals p { margin: 6px 0; font-size: 14px; }
+              .signature-area { margin-top: 80px; text-align: center; page-break-inside: avoid; }
+            </style>
+          </head>
+          <body>
+            ${paginasHTML}
+          </body>
+        </html>
       `;
 
-      paginasHTML += pagina;
-    });
-
-    const htmlCompleto = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <style>
-            @page { margin: 15mm; size: A4; }
-            body { font-family: 'Arial', sans-serif; font-size: 13px; color: #000; background-color: #FFF; margin: 0; padding: 0; }
-            .quebra-pagina { page-break-after: always; }
-            .header-container { display: flex; justify-content: space-between; margin-bottom: 25px; border-bottom: 2px solid #000; padding-bottom: 15px; }
-            .header-left p, .header-right p { margin: 4px 0; font-size: 14px; }
-            .header-right { text-align: right; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th, td { border: 1px solid #000; padding: 8px 4px; text-align: center; font-size: 12px; }
-            th { background-color: #E8E8E8; font-weight: bold; text-transform: uppercase; }
-            tr:nth-child(even) { background-color: #F9F9F9; }
-            .footer-container { display: flex; justify-content: space-between; margin-top: 30px; }
-            .footer-totals p { margin: 6px 0; font-size: 14px; }
-            .signature-area { margin-top: 80px; text-align: center; page-break-inside: avoid; }
-          </style>
-        </head>
-        <body>
-          ${paginasHTML}
-        </body>
-      </html>
-    `;
-
-    try {
       const { uri } = await Print.printToFileAsync({ html: htmlCompleto });
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-    } catch (err) {
-      Alert.alert('Erro', 'Não foi possível gerar o PDF.');
-    }
 
-    setGerando(false);
+    } catch (err: any) {
+      Alert.alert('Erro', 'Ocorreu um problema ao gerar o PDF: ' + err.message);
+    } finally {
+      setGerando(false);
+    }
   };
 
   return (
