@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
@@ -118,8 +119,7 @@ export default function HomeScreen() {
       setPerfilLogado(p);
       carregarDadosBase(p, p.id);
     } else {
-      // Se não tem dados, apenas mostra "Perfil Desconhecido" na tela para não travar
-      setPerfilLogado({ nome: 'Desconhecido' });
+      router.replace('/');
     }
   };
 
@@ -418,6 +418,7 @@ export default function HomeScreen() {
           <TouchableOpacity onPress={() => setModalEquipeVisivel(true)} style={styles.btnEquipe}>
             <Text style={styles.btnEquipeText}>👥 Todos Colabs</Text>
           </TouchableOpacity>
+          {/* BOTÃO DE SAIR FOI MOVIDO PARA A TELA DE CONFIGURAÇÕES */}
         </View>
 
         <View style={styles.header}>
