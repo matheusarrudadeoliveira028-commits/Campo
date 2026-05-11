@@ -1,21 +1,26 @@
 {
   "expo": {
-    "name": "Axoryn Campo",
-    "slug": "axoryn-campo",
+    "name": "Brekaz Produção",
+    "slug": "brekaz-producao",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "axoryncampo",
+    "scheme": "brekazproducao",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "br.com.axoryntech.axoryncampo"
+      "bundleIdentifier": "br.com.brekaz.producao",
+      "infoPlist": {
+        "NSCameraUsageDescription": "O Brekaz Produção precisa acessar a câmera para realizar a auditoria visual e prova de vida da equipe.",
+        "NSLocationWhenInUseUsageDescription": "O Brekaz Produção utiliza sua localização para mapear os pontos de colheita e gerenciar os talhões no mapa da fazenda.",
+        "NSPhotoLibraryUsageDescription": "O Brekaz Produção precisa de acesso à galeria para salvar e compartilhar os relatórios de auditoria em PDF."
+      }
     },
     "android": {
-      "package": "br.com.axoryntech.axoryncampo",
+      "package": "br.com.brekaz.producao",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#ffffff",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -24,7 +29,11 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -37,6 +46,12 @@
         "expo-camera",
         {
           "cameraPermission": "O Brekaz Produção precisa acessar a câmera para realizar a auditoria visual (Prova de Vida) da equipe no campo."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "O Brekaz Produção precisa da sua localização para registrar as coordenadas exatas da produção no campo."
         }
       ],
       [
