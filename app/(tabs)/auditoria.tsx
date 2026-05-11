@@ -2,7 +2,7 @@ import { Picker } from '@react-native-picker/picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function AuditoriaScreen() {
@@ -10,69 +10,88 @@ export default function AuditoriaScreen() {
   const [carregando, setCarregando] = useState(true);
   const [gerandoPDF, setGerandoPDF] = useState(false);
 
-  // Estados para o filtro de mês escolhido
-  const [mes, setMes] = useState(new Date().getMonth() + 1);
-  const [ano, setAno] = useState(new Date().getFullYear());
+  // FILTROS DE DATA INICIAL
+  const [diaInic, setDiaInic] = useState(1);
+  const [mesInic, setMesInic] = useState(new Date().getMonth() + 1);
+  const [anoInic, setAnoInic] = useState(new Date().getFullYear());
+
+  // FILTROS DE DATA FINAL
+  const [diaFim, setDiaFim] = useState(new Date().getDate());
+  const [mesFim, setMesFim] = useState(new Date().getMonth() + 1);
+  const [anoFim, setAnoFim] = useState(new Date().getFullYear());
+
+  // FILTRO DE COLABORADOR
+  const [colaboradorSel, setColaboradorSel] = useState('Todos');
+  const [listaColaboradores, setListaColaboradores] = useState<string[]>([]);
+
+  useEffect(() => {
+    puxarNomesColaboradores();
+  }, []);
 
   useEffect(() => {
     carregarAuditoria();
-  }, [mes, ano]); // Recarrega sempre que mudar o mês ou ano
+  }, [diaInic, mesInic, anoInic, diaFim, mesFim, anoFim, colaboradorSel]);
+
+  const puxarNomesColaboradores = async () => {
+    const { data } = await supabase.from('diarios_campo').select('colaborador');
+    if (data) {
+      const nomesUnicos = Array.from(new Set(data.map(i => i.colaborador)));
+      setListaColaboradores(nomesUnicos.sort());
+    }
+  };
 
   const carregarAuditoria = async () => {
     setCarregando(true);
     
-    // Calcula o primeiro e último dia do mês selecionado
-    const dataInicio = new Date(ano, mes - 1, 1).toISOString();
-    const dataFim = new Date(ano, mes, 0, 23, 59, 59).toISOString();
+    // 🛡️ TRAVA DE SEGURANÇA: Criamos as datas em UTC puro para evitar erro de fuso horário
+    // A foto do dia 08/05 só aparecerá se estiver dentro do intervalo exato selecionado.
+    const stringInic = new Date(Date.UTC(anoInic, mesInic - 1, diaInic, 0, 0, 0)).toISOString();
+    const stringFim = new Date(Date.UTC(anoFim, mesFim - 1, diaFim, 23, 59, 59)).toISOString();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('diarios_campo')
       .select('*')
       .not('foto_url', 'is', null)
-      .gte('data', dataInicio)
-      .lte('data', dataFim)
-      .order('colaborador', { ascending: true }) // Ordena por nome para facilitar o agrupamento
-      .order('data', { ascending: true });
+      .gte('data', stringInic)
+      .lte('data', stringFim);
+
+    if (colaboradorSel !== 'Todos') {
+      query = query.eq('colaborador', colaboradorSel);
+    }
+
+    const { data, error } = await query.order('data', { ascending: false });
 
     if (data) setLancamentos(data);
     setCarregando(false);
   };
 
   const gerarPDF = async () => {
-    if (lancamentos.length === 0) {
-      return Alert.alert("Aviso", "Nenhum registro encontrado neste mês.");
-    }
+    if (lancamentos.length === 0) return Alert.alert("Aviso", "Nenhum registro no período.");
     setGerandoPDF(true);
 
     try {
-      // 1. Agrupa os lançamentos por funcionário na memória
-      const agrupadoPorFuncionario = lancamentos.reduce((acc: any, item: any) => {
+      const agrupado = lancamentos.reduce((acc: any, item: any) => {
         if (!acc[item.colaborador]) acc[item.colaborador] = [];
         acc[item.colaborador].push(item);
         return acc;
       }, {});
 
-      // 2. Monta o HTML com quebras de página automáticas
       let htmlPaginas = '';
-      
-      Object.keys(agrupadoPorFuncionario).forEach((nomeFuncionario) => {
-        const registros = agrupadoPorFuncionario[nomeFuncionario];
-        
+      Object.keys(agrupado).forEach((nome) => {
+        const regs = agrupado[nome];
         htmlPaginas += `
-          <div class="pagina-funcionario">
-            <div class="header-funcionario">
-              <h2>Extrato de Auditoria: ${nomeFuncionario}</h2>
-              <p>Referente a: ${mes < 10 ? '0' + mes : mes}/${ano} | Total de Dias: ${registros.length}</p>
+          <div class="pagina">
+            <div class="header">
+              <h2>Auditoria: ${nome}</h2>
+              <p>Período: ${diaInic}/${mesInic}/${anoInic} até ${diaFim}/${mesFim}/${anoFim}</p>
             </div>
-            
             <div class="grid">
-              ${registros.map((reg: any) => `
-                <div class="card-foto">
-                  <img src="${reg.foto_url}" class="img-selfie" />
-                  <div class="info-selfie">
-                    <strong>${new Date(reg.data).toLocaleDateString('pt-BR')}</strong><br>
-                    <span>⏱️ ${new Date(reg.data).toLocaleTimeString('pt-BR').substring(0, 5)}</span><br>
-                    <span style="font-size: 8px;">Fz: ${reg.fazenda} | R: ${reg.ramal}</span>
+              ${regs.map((r: any) => `
+                <div class="card">
+                  <img src="${r.foto_url}" />
+                  <div class="txt">
+                    <strong>${new Date(r.data).toLocaleDateString('pt-BR')}</strong> - ${new Date(r.data).toLocaleTimeString('pt-BR').substring(0, 5)}<br>
+                    <span>Fiscal: ${r.fiscal_nome || 'Admin'}</span>
                   </div>
                 </div>
               `).join('')}
@@ -81,33 +100,20 @@ export default function AuditoriaScreen() {
         `;
       });
 
-      const htmlCompleto = `
-        <html>
-          <head>
-            <style>
-              @page { size: A4; margin: 10mm; }
-              body { font-family: sans-serif; color: #333; margin: 0; }
-              .pagina-funcionario { page-break-after: always; border-top: 8px solid #27AE60; padding-top: 10px; }
-              .header-funcionario { border-bottom: 2px solid #EEE; margin-bottom: 20px; padding-bottom: 10px; }
-              h2 { color: #2C3E50; margin: 0; }
-              .grid { display: flex; flex-wrap: wrap; gap: 10px; }
-              .card-foto { width: 120px; border: 1px solid #DDD; border-radius: 5px; padding: 5px; text-align: center; background: #FAFAFA; }
-              .img-selfie { width: 100%; height: 110px; object-fit: cover; border-radius: 3px; }
-              .info-selfie { margin-top: 5px; font-size: 9px; line-height: 1.2; }
-              .info-selfie strong { color: #E74C3C; }
-            </style>
-          </head>
-          <body>
-            ${htmlPaginas}
-          </body>
-        </html>
-      `;
+      const htmlCompleto = `<html><head><style>
+        @page { size: A4; margin: 10mm; }
+        body { font-family: sans-serif; color: #333; }
+        .pagina { page-break-after: always; border-top: 5px solid #27AE60; padding-top: 10px; }
+        .header { margin-bottom: 15px; border-bottom: 1px solid #EEE; }
+        .grid { display: flex; flex-wrap: wrap; gap: 8px; }
+        .card { width: 105px; border: 1px solid #DDD; text-align: center; font-size: 8px; padding: 3px; background: #F9F9F9; }
+        img { width: 100%; height: 90px; object-fit: cover; border-radius: 2px; }
+      </style></head><body>${htmlPaginas}</body></html>`;
 
       const { uri } = await Print.printToFileAsync({ html: htmlCompleto });
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-
     } catch (e) {
-      Alert.alert("Erro", "Falha ao gerar extrato mensal.");
+      Alert.alert("Erro", "Falha ao gerar o relatório.");
     } finally {
       setGerandoPDF(false);
     }
@@ -116,50 +122,56 @@ export default function AuditoriaScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Relatório Mensal 📑</Text>
-        <Text style={styles.subtitle}>Auditoria Individual por Página</Text>
+        <Text style={styles.title}>Auditoria por Período 📸</Text>
+        <Text style={styles.subtitle}>Pesquisa entre datas e funcionários</Text>
       </View>
 
-      {/* FILTROS DE DATA */}
-      <View style={styles.filtrosBox}>
-        <View style={styles.filtroItem}>
-          <Text style={styles.labelFiltro}>Mês:</Text>
-          <Picker selectedValue={mes} onValueChange={(v) => setMes(v)} style={styles.picker}>
-            {Array.from({length: 12}, (_, i) => (
-              <Picker.Item key={i+1} label={new Date(0, i).toLocaleString('pt-BR', {month: 'long'}).toUpperCase()} value={i+1} />
-            ))}
-          </Picker>
+      {/* FILTROS DE DATA - DE / ATÉ */}
+      <View style={styles.filtrosContainer}>
+        <Text style={styles.secaoTitle}>📅 De:</Text>
+        <View style={styles.row}>
+          <View style={styles.boxPicker}><Picker selectedValue={diaInic} onValueChange={setDiaInic} style={styles.picker}>{Array.from({length: 31}, (_, i) => <Picker.Item key={i} label={`${i+1}`} value={i+1} />)}</Picker></View>
+          <View style={styles.boxPicker}><Picker selectedValue={mesInic} onValueChange={setMesInic} style={styles.picker}>{Array.from({length: 12}, (_, i) => <Picker.Item key={i} label={new Date(0, i).toLocaleString('pt-BR', {month: 'short'}).toUpperCase()} value={i+1} />)}</Picker></View>
+          <View style={styles.boxPicker}><Picker selectedValue={anoInic} onValueChange={setAnoInic} style={styles.picker}><Picker.Item label="2025" value={2025} /><Picker.Item label="2026" value={2026} /></Picker></View>
         </View>
-        <View style={styles.filtroItem}>
-          <Text style={styles.labelFiltro}>Ano:</Text>
-          <Picker selectedValue={ano} onValueChange={(v) => setAno(v)} style={styles.picker}>
-            <Picker.Item label="2025" value={2025} />
-            <Picker.Item label="2026" value={2026} />
-          </Picker>
+
+        <Text style={styles.secaoTitle}>📅 Até:</Text>
+        <View style={styles.row}>
+          <View style={styles.boxPicker}><Picker selectedValue={diaFim} onValueChange={setDiaFim} style={styles.picker}>{Array.from({length: 31}, (_, i) => <Picker.Item key={i} label={`${i+1}`} value={i+1} />)}</Picker></View>
+          <View style={styles.boxPicker}><Picker selectedValue={mesFim} onValueChange={setMesFim} style={styles.picker}>{Array.from({length: 12}, (_, i) => <Picker.Item key={i} label={new Date(0, i).toLocaleString('pt-BR', {month: 'short'}).toUpperCase()} value={i+1} />)}</Picker></View>
+          <View style={styles.boxPicker}><Picker selectedValue={anoFim} onValueChange={setAnoFim} style={styles.picker}><Picker.Item label="2025" value={2025} /><Picker.Item label="2026" value={2026} /></Picker></View>
         </View>
       </View>
 
-      <TouchableOpacity 
-        style={[styles.btnGerar, gerandoPDF && { backgroundColor: '#95A5A6' }]} 
-        onPress={gerarPDF}
-        disabled={gerandoPDF}
-      >
-        {gerandoPDF ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnGerarTexto}>📄 GERAR EXTRATO MENSAL</Text>}
+      <View style={styles.filtroFunc}>
+         <Text style={styles.labelFunc}>👤 Colaborador</Text>
+         <Picker selectedValue={colaboradorSel} onValueChange={setColaboradorSel} style={styles.picker}>
+            <Picker.Item label="TODOS OS FUNCIONÁRIOS" value="Todos" />
+            {listaColaboradores.map((n, i) => <Picker.Item key={i} label={n} value={n} />)}
+         </Picker>
+      </View>
+
+      <TouchableOpacity style={styles.btnPdf} onPress={gerarPDF} disabled={gerandoPDF}>
+        {gerandoPDF ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnPdfTxt}>📄 GERAR PDF DO PERÍODO</Text>}
       </TouchableOpacity>
 
       {carregando ? (
-        <ActivityIndicator size="large" color="#27AE60" style={{ marginTop: 30 }} />
+        <ActivityIndicator size="large" color="#27AE60" style={{marginTop: 30}} />
       ) : (
-        <ScrollView contentContainerStyle={styles.lista}>
-          <Text style={styles.contador}>Encontrados {lancamentos.length} registros com foto.</Text>
-          {/* Mostra um resumo rápido na tela */}
-          {lancamentos.slice(0, 10).map((item, idx) => (
-            <View key={idx} style={styles.resumoRow}>
-              <Text style={styles.resumoNome}>👤 {item.colaborador}</Text>
-              <Text style={styles.resumoData}>{new Date(item.data).toLocaleDateString('pt-BR')}</Text>
-            </View>
-          ))}
-          {lancamentos.length > 10 && <Text style={styles.mais}>... e mais {lancamentos.length - 10} fotos.</Text>}
+        <ScrollView contentContainerStyle={styles.scroll}>
+          <Text style={styles.count}>{lancamentos.length} fotos no período</Text>
+          <View style={styles.grid}>
+            {lancamentos.map((item, idx) => (
+              <View key={idx} style={styles.card}>
+                <Image source={{ uri: item.foto_url }} style={styles.foto} />
+                <View style={styles.info}>
+                  <Text style={styles.nome} numberOfLines={1}>{item.colaborador}</Text>
+                  <Text style={styles.fiscal}>👮 {item.fiscal_nome || 'Admin'}</Text>
+                  <Text style={styles.data}>{new Date(item.data).toLocaleDateString('pt-BR')} {new Date(item.data).toLocaleTimeString('pt-BR').substring(0, 5)}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
         </ScrollView>
       )}
     </View>
@@ -167,23 +179,30 @@ export default function AuditoriaScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { marginTop: 50, marginBottom: 10, alignItems: 'center' },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#2C3E50' },
-  subtitle: { fontSize: 13, color: '#7F8C8D' },
+  container: { flex: 1, backgroundColor: '#F2F4F7' },
+  header: { marginTop: 45, marginBottom: 10, alignItems: 'center' },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#2C3E50' },
+  subtitle: { fontSize: 12, color: '#7F8C8D' },
   
-  filtrosBox: { flexDirection: 'row', padding: 15, gap: 10 },
-  filtroItem: { flex: 1, backgroundColor: '#FFF', borderRadius: 8, borderWidth: 1, borderColor: '#DDD', paddingLeft: 10 },
-  labelFiltro: { fontSize: 10, fontWeight: 'bold', color: '#95A5A6', marginTop: 5 },
-  picker: { height: 45, width: '100%' },
+  filtrosContainer: { paddingHorizontal: 15 },
+  secaoTitle: { fontSize: 11, fontWeight: 'bold', color: '#34495E', marginBottom: 5, marginTop: 5 },
+  row: { flexDirection: 'row', gap: 8, marginBottom: 5 },
+  boxPicker: { flex: 1, backgroundColor: '#FFF', borderRadius: 8, height: 45, borderWidth: 1, borderColor: '#DCDFE6', justifyContent: 'center' },
+  picker: { width: '100%' },
 
-  btnGerar: { backgroundColor: '#27AE60', margin: 15, padding: 15, borderRadius: 10, alignItems: 'center', elevation: 3 },
-  btnGerarTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  filtroFunc: { backgroundColor: '#FFF', marginHorizontal: 15, marginVertical: 10, borderRadius: 8, height: 55, borderWidth: 1, borderColor: '#DCDFE6', justifyContent: 'center' },
+  labelFunc: { fontSize: 10, fontWeight: 'bold', color: '#909399', marginLeft: 10 },
 
-  lista: { padding: 15 },
-  contador: { textAlign: 'center', color: '#7F8C8D', marginBottom: 15, fontSize: 12 },
-  resumoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EEE' },
-  resumoNome: { fontSize: 14, color: '#34495E', fontWeight: 'bold' },
-  resumoData: { fontSize: 14, color: '#95A5A6' },
-  mais: { textAlign: 'center', marginTop: 10, fontStyle: 'italic', color: '#BDC3C7' }
+  btnPdf: { backgroundColor: '#2C3E50', marginHorizontal: 15, padding: 14, borderRadius: 10, alignItems: 'center', marginBottom: 10 },
+  btnPdfTxt: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+
+  scroll: { paddingHorizontal: 10, paddingBottom: 40 },
+  count: { textAlign: 'center', marginBottom: 10, fontSize: 12, color: '#606266', fontWeight: 'bold' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  card: { width: '48%', backgroundColor: '#FFF', borderRadius: 10, marginBottom: 15, elevation: 2, overflow: 'hidden' },
+  foto: { width: '100%', height: 110 },
+  info: { padding: 8 },
+  nome: { fontSize: 12, fontWeight: 'bold', color: '#2C3E50' },
+  fiscal: { fontSize: 10, color: '#E74C3C', fontWeight: 'bold', marginTop: 2 },
+  data: { fontSize: 9, color: '#909399', marginTop: 4 }
 });

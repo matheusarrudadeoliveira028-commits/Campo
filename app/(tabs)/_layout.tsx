@@ -56,55 +56,70 @@ export default function DrawerLayout() {
           drawerActiveBackgroundColor: '#27AE60',
           drawerActiveTintColor: '#FFF',
           drawerInactiveTintColor: '#34495E',
-          drawerLabelStyle: { fontSize: 16, fontWeight: 'bold' }
+          drawerLabelStyle: { 
+            fontSize: 16, 
+            fontWeight: 'bold',
+            textTransform: 'capitalize' // 👉 Garante a primeira letra sempre Maiúscula
+          }
         }}
       >
         
-        {/* TELA 1: Lançamentos (SEMPRE LIVRE) */}
+        {/* TELA 1: Lançar Produção */}
         <Drawer.Screen
           name="index"
           options={{
             drawerLabel: 'Lançar Produção',
-            title: 'Menu Principal',
+            title: 'Início',
             drawerIcon: ({ color, size }) => <Ionicons name="leaf" size={size} color={color} />,
           }}
         />
 
-        {/* TELA 2: Mapa (OBEDECE A TRAVA) */}
+        {/* TELA 2: Mapa da Fazenda */}
         <Drawer.Screen
           name="mapa"
           options={{
-            drawerLabel: 'Mapa da Fazenda',
+            drawerLabel: 'Mapa Da Fazenda',
             title: 'Mapa',
             drawerIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
-            // Mostra se for Admin OU se o botão geral do mapa estiver ligado
             drawerItemStyle: (isAdmin || liberarMapa) ? {} : { display: 'none' } 
           }}
         />
 
-        {/* TELA 3: Fechamento Financeiro (OBEDECE A TRAVA) */}
+        {/* TELA 3: Auditoria de Fotos (Adicionada conforme as telas anteriores) */}
+        <Drawer.Screen
+          name="auditoria"
+          options={{
+            drawerLabel: 'Auditoria De Fotos',
+            title: 'Auditoria',
+            drawerIcon: ({ color, size }) => <Ionicons name="camera" size={size} color={color} />,
+            // Se quiser que só Admin veja a auditoria, descomente a linha abaixo:
+            // drawerItemStyle: isAdmin ? {} : { display: 'none' }
+          }}
+        />
+
+        {/* TELA 4: Fechamento Financeiro */}
         <Drawer.Screen
           name="fechamento"
           options={{
             drawerLabel: 'Fechamento Financeiro',
-            title: 'Folha de Pagamento',
+            title: 'Financeiro',
             drawerIcon: ({ color, size }) => <Ionicons name="cash" size={size} color={color} />,
             drawerItemStyle: (isAdmin || liberarFinanceiro) ? {} : { display: 'none' } 
           }}
         />
 
-        {/* TELA 4: Cadastro de Equipe (OBEDECE A TRAVA) */}
+        {/* TELA 5: Gestão de Acessos */}
         <Drawer.Screen
           name="usuarios"
           options={{
-            drawerLabel: 'Gestão de Acessos',
-            title: 'Equipe do Sistema',
+            drawerLabel: 'Gestão De Acessos',
+            title: 'Equipe',
             drawerIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} />,
             drawerItemStyle: (isAdmin || liberarEquipe) ? {} : { display: 'none' }
           }}
         />
 
-        {/* TELA 5: Configurações (SEMPRE LIVRE, MAS CONTEÚDO MUDA LÁ DENTRO) */}
+        {/* TELA 6: Configurações */}
         <Drawer.Screen
           name="configuracoes"
           options={{

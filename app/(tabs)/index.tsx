@@ -525,7 +525,7 @@ export default function HomeScreen() {
               ) : null}
 
               <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
-                {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR NO CELULAR</Text>}
+                {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR PARA ENVIO</Text>}
               </TouchableOpacity>
             </>
           )}

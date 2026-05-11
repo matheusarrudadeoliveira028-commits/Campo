@@ -150,7 +150,7 @@ export default function FeriasScreen() {
         />
 
         <TouchableOpacity style={styles.button} onPress={salvarLocalmente} disabled={salvando}>
-          {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR NO CELULAR</Text>}
+          {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR PARA ENVIO</Text>}
         </TouchableOpacity>
       </View>
     </ScrollView>
