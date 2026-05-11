@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
@@ -71,8 +73,39 @@ export default function ConfiguracoesScreen() {
     }
   };
 
+  // === NOVO: BOTÃO DE LOGOUT MOVIDO PARA CÁ ===
+  const fazerLogout = () => {
+    Alert.alert("Sair do Sistema", "Deseja realmente sair da sua conta no aplicativo?", [
+      { text: "Cancelar", style: "cancel" },
+      { 
+        text: "Sim, Sair", 
+        style: 'destructive',
+        onPress: () => { 
+          // 1. Limpa a mochila do usuário no fundo (Sem await)
+          AsyncStorage.removeItem('@perfil_offline');
+          
+          // 2. Destrói os tokens do Supabase no fundo (Sem await)
+          AsyncStorage.getAllKeys().then(chaves => {
+            const chavesSupabase = chaves.filter(c => c.includes('supabase.auth.token'));
+            if (chavesSupabase.length > 0) {
+              AsyncStorage.multiRemove(chavesSupabase);
+            }
+          });
+
+          // 3. Avisa o Supabase pra deslogar, ignora o resultado se der erro sem internet
+          supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+
+          // 4. Joga pra tela de login na mesma hora!
+          setTimeout(() => {
+            router.replace('/');
+          }, 100);
+        } 
+      }
+    ]);
+  };
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 50 }}>
       <View style={styles.header}>
         <Text style={styles.title}>Configurações ⚙️</Text>
         <Text style={styles.subtitle}>Regras gerais de operação da fazenda</Text>
@@ -117,6 +150,15 @@ export default function ConfiguracoesScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* SESSÃO DE LOGOUT */}
+      <View style={styles.sessaoSair}>
+        <Text style={styles.avisoSair}>Se precisar trocar de usuário ou atualizar o sistema por completo, saia da sua conta abaixo.</Text>
+        <TouchableOpacity style={styles.btnSair} onPress={fazerLogout}>
+          <Text style={styles.btnSairTexto}>🚪 SAIR DA CONTA</Text>
+        </TouchableOpacity>
+      </View>
+
     </ScrollView>
   );
 }
@@ -135,4 +177,10 @@ const styles = StyleSheet.create({
   col: { width: '48%' },
   button: { backgroundColor: '#2C3E50', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 30 },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  
+  // ESTILOS DO BOTÃO DE SAIR
+  sessaoSair: { marginTop: 40, alignItems: 'center', borderTopWidth: 1, borderColor: '#E0E6ED', paddingTop: 30 },
+  avisoSair: { fontSize: 12, color: '#95A5A6', textAlign: 'center', marginBottom: 15, paddingHorizontal: 20 },
+  btnSair: { backgroundColor: '#E74C3C', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 8, elevation: 3, width: '100%', alignItems: 'center' },
+  btnSairTexto: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 }
 });

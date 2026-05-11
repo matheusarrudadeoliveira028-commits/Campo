@@ -1,4 +1,5 @@
-import { Picker } from '@react-native-picker/picker'; // IMPORTAMOS O PICKER AQUI
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Picker } from '@react-native-picker/picker';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
@@ -8,54 +9,90 @@ export default function MapaScreen() {
   const [totalGeralArvores, setTotalGeralArvores] = useState(0);
   const [carregando, setCarregando] = useState(true);
   
-  // NOVO: Estado para guardar os serviços que vêm do banco de dados
+  // NOVO: Controle de modo offline
+  const [isOffline, setIsOffline] = useState(false);
+
+  // Estado para guardar os serviços que vêm do banco de dados
   const [listaServicos, setListaServicos] = useState<any[]>([]);
 
   useEffect(() => {
     carregarMapa();
   }, []);
 
+  // Lógica separada para não repetir código ao puxar do Banco ou da Mochila
+  const processarDadosMapa = (data: any[]) => {
+    let somaGeral = 0;
+    const agrupamento: any = {};
+
+    data.forEach((item) => {
+      const qtd = item.total_pes || 0;
+      somaGeral += qtd;
+
+      if (!agrupamento[item.fazenda]) agrupamento[item.fazenda] = { total: 0, quadras: {} };
+      agrupamento[item.fazenda].total += qtd;
+
+      if (!agrupamento[item.fazenda].quadras[item.quadra]) agrupamento[item.fazenda].quadras[item.quadra] = { total: 0, ramais: [] };
+      agrupamento[item.fazenda].quadras[item.quadra].total += qtd;
+
+      agrupamento[item.fazenda].quadras[item.quadra].ramais.push({
+        id: item.id, 
+        ramal: item.ramal,
+        total: qtd,
+        servico: item.servico_permitido || 'Não Definido'
+      });
+    });
+
+    setTotalGeralArvores(somaGeral);
+    setDadosAgrupados(agrupamento);
+  };
+
   const carregarMapa = async () => {
     setCarregando(true);
     
-    // 1. Busca os serviços cadastrados no sistema
-    const { data: servs } = await supabase.from('servicos').select('*').order('nome');
-    if (servs) setListaServicos(servs);
+    try {
+      // 1. Busca os serviços cadastrados no sistema
+      const { data: servs, error: errServs } = await supabase.from('servicos').select('*').order('nome');
+      if (errServs) throw new Error("Falha na rede");
+      if (servs) {
+        setListaServicos(servs);
+        await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs));
+      }
 
-    // 2. Busca o mapa estruturado
-    const { data } = await supabase.from('mapa_fazendas').select('*').order('fazenda').order('quadra').order('ramal');
-    
-    if (data) {
-      let somaGeral = 0;
-      const agrupamento: any = {};
+      // 2. Busca o mapa estruturado
+      const { data, error } = await supabase.from('mapa_fazendas').select('*').order('fazenda').order('quadra').order('ramal');
+      if (error) throw new Error("Falha na rede");
+      
+      if (data) {
+        await AsyncStorage.setItem('@mochila_mapa', JSON.stringify(data));
+        processarDadosMapa(data);
+      }
+      
+      setIsOffline(false); // Sucesso! Tem internet.
 
-      data.forEach((item) => {
-        const qtd = item.total_pes || 0;
-        somaGeral += qtd;
+    } catch (error) {
+      // CAIU A INTERNET: Aciona o Modo Offline
+      setIsOffline(true);
+      
+      const servsOffline = await AsyncStorage.getItem('@mochila_servicos');
+      if (servsOffline) setListaServicos(JSON.parse(servsOffline));
 
-        if (!agrupamento[item.fazenda]) agrupamento[item.fazenda] = { total: 0, quadras: {} };
-        agrupamento[item.fazenda].total += qtd;
-
-        if (!agrupamento[item.fazenda].quadras[item.quadra]) agrupamento[item.fazenda].quadras[item.quadra] = { total: 0, ramais: [] };
-        agrupamento[item.fazenda].quadras[item.quadra].total += qtd;
-
-        agrupamento[item.fazenda].quadras[item.quadra].ramais.push({
-          id: item.id, 
-          ramal: item.ramal,
-          total: qtd,
-          servico: item.servico_permitido || 'Não Definido'
-        });
-      });
-
-      setTotalGeralArvores(somaGeral);
-      setDadosAgrupados(agrupamento);
+      const mapaOffline = await AsyncStorage.getItem('@mochila_mapa');
+      if (mapaOffline) {
+        processarDadosMapa(JSON.parse(mapaOffline));
+      }
     }
+    
     setCarregando(false);
   };
 
-  // NOVA FUNÇÃO: Trava de Segurança (Confirmação antes de salvar)
+  // Trava de Segurança (Confirmação antes de salvar)
   const confirmarAtualizacao = (id: number, campo: string, valorAntigo: any, valorNovo: any, nomeAmigavel: string) => {
     if (valorAntigo === valorNovo) return; // Se não mudou nada, não faz nada
+    
+    if (isOffline) {
+      Alert.alert("⚠️ Sem Internet", "Não é possível alterar a estrutura da fazenda no modo offline. Conecte-se para editar.");
+      return;
+    }
 
     Alert.alert(
       "⚠️ Atenção",
@@ -87,102 +124,113 @@ export default function MapaScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 50 }}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Visão Geral 🌳</Text>
-        <Text style={styles.subtitle}>Contagem Estruturada das Fazendas</Text>
-      </View>
-
-      <View style={styles.placarCard}>
-        <Text style={styles.placarTexto}>Total Geral Cadastrado</Text>
-        <Text style={styles.placarNumero}>{totalGeralArvores.toLocaleString('pt-BR')}</Text>
-      </View>
-
-      <TouchableOpacity style={styles.btnAtualizar} onPress={carregarMapa}>
-        <Text style={styles.btnAtualizarTexto}>↻ Atualizar Contagem</Text>
-      </TouchableOpacity>
-
-      {carregando ? (
-        <ActivityIndicator size="large" color="#27AE60" style={{marginTop: 30}} />
-      ) : (
-        <View style={styles.listaContainer}>
-          {Object.keys(dadosAgrupados).map((nomeFazenda) => {
-            const fazenda = dadosAgrupados[nomeFazenda];
-            return (
-              <View key={nomeFazenda} style={styles.fazendaCard}>
-                <View style={styles.fazendaHeader}>
-                  <Text style={styles.fazendaTitulo}>🏡 Fazenda {nomeFazenda}</Text>
-                  <Text style={styles.fazendaTotal}>{fazenda.total.toLocaleString('pt-BR')} pés</Text>
-                </View>
-
-                {Object.keys(fazenda.quadras).map((nomeQuadra) => {
-                  const quadra = fazenda.quadras[nomeQuadra];
-                  return (
-                    <View key={nomeQuadra} style={styles.quadraContainer}>
-                      <View style={styles.quadraHeader}>
-                        <Text style={styles.quadraTitulo}>📍 Quadra {nomeQuadra}</Text>
-                        <Text style={styles.quadraTotal}>{quadra.total.toLocaleString('pt-BR')} pés</Text>
-                      </View>
-
-                      <View style={styles.ramalContainer}>
-                        {quadra.ramais.map((r: any, idx: number) => (
-                          <View key={r.id || idx} style={styles.ramalItem}>
-                            
-                            {/* COLUNA ESQUERDA: RAMAL E SERVIÇO */}
-                            <View style={{ flex: 1.5, paddingRight: 10 }}>
-                              <Text style={styles.ramalTexto}>↳ Ramal {r.ramal}</Text>
-                              
-                              <Text style={styles.miniLabel}>Serviço Vinculado:</Text>
-                              {/* PICKER TRAZENDO OS SERVIÇOS DO BANCO */}
-                              <View style={styles.miniPickerContainer}>
-                                <Picker
-                                  selectedValue={r.servico}
-                                  onValueChange={(itemValue) => {
-                                    if (itemValue !== r.servico) {
-                                      confirmarAtualizacao(r.id, 'servico_permitido', r.servico, itemValue, 'o Serviço');
-                                    }
-                                  }}
-                                  style={styles.miniPicker}
-                                >
-                                  <Picker.Item label="Não Definido" value="Não Definido" />
-                                  {listaServicos.map((s) => (
-                                    <Picker.Item key={s.id} label={s.nome} value={s.nome} />
-                                  ))}
-                                </Picker>
-                              </View>
-                            </View>
-
-                            {/* COLUNA DIREITA: QUANTIDADE DE PÉS */}
-                            <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
-                              <Text style={styles.miniLabel}>Qtd Pés (Editar):</Text>
-                              <TextInput 
-                                style={styles.inputEditQtd} 
-                                defaultValue={r.total.toString()}
-                                keyboardType="numeric"
-                                onEndEditing={(e) => {
-                                  const novoValor = parseInt(e.nativeEvent.text) || 0;
-                                  confirmarAtualizacao(r.id, 'total_pes', r.total, novoValor, 'a Quantidade de Pés');
-                                }}
-                              />
-                            </View>
-
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            );
-          })}
+    <View style={{ flex: 1 }}>
+      {/* ALERTA DE MODO OFFLINE */}
+      {isOffline && (
+        <View style={styles.offlineBadge}>
+          <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO - Apenas visualização.</Text>
         </View>
       )}
-    </ScrollView>
+
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 50 }}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Visão Geral 🌳</Text>
+          <Text style={styles.subtitle}>Contagem Estruturada das Fazendas</Text>
+        </View>
+
+        <View style={styles.placarCard}>
+          <Text style={styles.placarTexto}>Total Geral Cadastrado</Text>
+          <Text style={styles.placarNumero}>{totalGeralArvores.toLocaleString('pt-BR')}</Text>
+        </View>
+
+        <TouchableOpacity style={styles.btnAtualizar} onPress={carregarMapa}>
+          <Text style={styles.btnAtualizarTexto}>↻ Atualizar Contagem</Text>
+        </TouchableOpacity>
+
+        {carregando ? (
+          <ActivityIndicator size="large" color="#27AE60" style={{marginTop: 30}} />
+        ) : (
+          <View style={styles.listaContainer}>
+            {Object.keys(dadosAgrupados).map((nomeFazenda) => {
+              const fazenda = dadosAgrupados[nomeFazenda];
+              return (
+                <View key={nomeFazenda} style={styles.fazendaCard}>
+                  <View style={styles.fazendaHeader}>
+                    <Text style={styles.fazendaTitulo}>🏡 Fazenda {nomeFazenda}</Text>
+                    <Text style={styles.fazendaTotal}>{fazenda.total.toLocaleString('pt-BR')} pés</Text>
+                  </View>
+
+                  {Object.keys(fazenda.quadras).map((nomeQuadra) => {
+                    const quadra = fazenda.quadras[nomeQuadra];
+                    return (
+                      <View key={nomeQuadra} style={styles.quadraContainer}>
+                        <View style={styles.quadraHeader}>
+                          <Text style={styles.quadraTitulo}>📍 Quadra {nomeQuadra}</Text>
+                          <Text style={styles.quadraTotal}>{quadra.total.toLocaleString('pt-BR')} pés</Text>
+                        </View>
+
+                        <View style={styles.ramalContainer}>
+                          {quadra.ramais.map((r: any, idx: number) => (
+                            <View key={r.id || idx} style={styles.ramalItem}>
+                              
+                              {/* COLUNA ESQUERDA: RAMAL E SERVIÇO */}
+                              <View style={{ flex: 1.5, paddingRight: 10 }}>
+                                <Text style={styles.ramalTexto}>↳ Ramal {r.ramal}</Text>
+                                
+                                <Text style={styles.miniLabel}>Serviço Vinculado:</Text>
+                                {/* PICKER TRAZENDO OS SERVIÇOS DO BANCO */}
+                                <View style={styles.miniPickerContainer}>
+                                  <Picker
+                                    selectedValue={r.servico}
+                                    onValueChange={(itemValue) => {
+                                      if (itemValue !== r.servico) {
+                                        confirmarAtualizacao(r.id, 'servico_permitido', r.servico, itemValue, 'o Serviço');
+                                      }
+                                    }}
+                                    style={styles.miniPicker}
+                                  >
+                                    <Picker.Item label="Não Definido" value="Não Definido" />
+                                    {listaServicos.map((s) => (
+                                      <Picker.Item key={s.id} label={s.nome} value={s.nome} />
+                                    ))}
+                                  </Picker>
+                                </View>
+                              </View>
+
+                              {/* COLUNA DIREITA: QUANTIDADE DE PÉS */}
+                              <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                                <Text style={styles.miniLabel}>Qtd Pés (Editar):</Text>
+                                <TextInput 
+                                  style={styles.inputEditQtd} 
+                                  defaultValue={r.total.toString()}
+                                  keyboardType="numeric"
+                                  onEndEditing={(e) => {
+                                    const novoValor = parseInt(e.nativeEvent.text) || 0;
+                                    confirmarAtualizacao(r.id, 'total_pes', r.total, novoValor, 'a Quantidade de Pés');
+                                  }}
+                                />
+                              </View>
+
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7FA', padding: 20 },
+  offlineBadge: { backgroundColor: '#E74C3C', padding: 8, alignItems: 'center', justifyContent: 'center' },
+  offlineText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   header: { marginBottom: 20, marginTop: 20, alignItems: 'center' },
   title: { fontSize: 28, fontWeight: 'bold', color: '#2C3E50' },
   subtitle: { fontSize: 16, color: '#7F8C8D', marginTop: 5 },

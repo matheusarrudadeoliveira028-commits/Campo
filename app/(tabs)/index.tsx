@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
@@ -33,12 +32,14 @@ export default function HomeScreen() {
   const [perfilLogado, setPerfilLogado] = useState<any>(null);
   const [lancamentosPendentes, setLancamentosPendentes] = useState<any[]>([]);
   const [sincronizando, setSincronizando] = useState(false);
+  
+  const [isOffline, setIsOffline] = useState(false);
 
   // Controle de fotos tiradas hoje
   const [fotosTiradasHoje, setFotosTiradasHoje] = useState<string[]>([]);
   const [fotoJaTirada, setFotoJaTirada] = useState(false);
 
-  // NOVO: Controle de Horário Permitido (Padrão 06:00 às 18:00)
+  // Controle de Horário Permitido
   const [horaInicioPermitida, setHoraInicioPermitida] = useState('06:00');
   const [horaFimPermitida, setHoraFimPermitida] = useState('18:00');
 
@@ -87,63 +88,39 @@ export default function HomeScreen() {
 
   const carregarUsuarioLogado = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data, error } = await supabase.from('perfis').select('*').eq('id', user.id).single();
-        if (data && !error) {
-          setPerfilLogado(data);
-          await AsyncStorage.setItem('@perfil_offline', JSON.stringify(data));
-          carregarDadosBase(data, user.id);
+      const perfilSalvoStr = await AsyncStorage.getItem('@perfil_offline');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (session && !sessionError) {
+        const { data: perfilData, error: perfilError } = await supabase.from('perfis').select('*').eq('id', session.user.id).single();
+        
+        if (perfilData && !perfilError) {
+          setPerfilLogado(perfilData);
+          await AsyncStorage.setItem('@perfil_offline', JSON.stringify(perfilData));
+          carregarDadosBase(perfilData, session.user.id);
+          setIsOffline(false);
         } else {
-          const perfilSalvo = await AsyncStorage.getItem('@perfil_offline');
-          if (perfilSalvo) {
-            const perfilParsed = JSON.parse(perfilSalvo);
-            setPerfilLogado(perfilParsed);
-            carregarDadosBase(perfilParsed, user.id);
-          } else {
-            const perfilGen = { nome: user.email?.split('@')[0].toUpperCase() || 'USUÁRIO', cargo: 'Sessão Local' };
-            setPerfilLogado(perfilGen);
-            carregarDadosBase(perfilGen, user.id);
-          }
+          acionarMochilaDePerfil(perfilSalvoStr);
         }
       } else {
-        setPerfilLogado({ nome: 'Desconhecido', cargo: 'Sem Sessão' });
-        carregarDadosBase(null, null);
+        acionarMochilaDePerfil(perfilSalvoStr);
       }
     } catch (e) {
-      const perfilSalvo = await AsyncStorage.getItem('@perfil_offline');
-      if (perfilSalvo) {
-        const perfilParsed = JSON.parse(perfilSalvo);
-        setPerfilLogado(perfilParsed);
-        carregarDadosBase(perfilParsed, perfilParsed.id);
-      } else {
-        setPerfilLogado({ nome: 'Modo Local', cargo: 'Sessão Salva' });
-        carregarDadosBase(null, null);
-      }
+      const perfilSalvoStr = await AsyncStorage.getItem('@perfil_offline');
+      acionarMochilaDePerfil(perfilSalvoStr);
     }
   };
 
-  // === ATUALIZADO: LOGOUT RÁPIDO (SEM TRAVAR) ===
-  const fazerLogout = () => {
-    Alert.alert("Sair do Sistema", "⚠️ Atenção: Se você sair, precisará de internet para entrar novamente. Deseja sair?", [
-      { text: "Cancelar", style: "cancel" },
-      { 
-        text: "Sim, Sair", 
-        style: 'destructive',
-        onPress: async () => { 
-          try {
-            setPerfilLogado(null); 
-            await AsyncStorage.removeItem('@perfil_offline'); 
-            // Pede pro Supabase sair no fundo, sem prender a tela
-            supabase.auth.signOut().catch(() => console.log("Deslogado offline"));
-            // Vai pra tela de login imediatamente
-            router.replace('/'); 
-          } catch (error) {
-            router.replace('/'); 
-          }
-        } 
-      }
-    ]);
+  const acionarMochilaDePerfil = (perfilSalvoStr: string | null) => {
+    setIsOffline(true);
+    if (perfilSalvoStr) {
+      const p = JSON.parse(perfilSalvoStr);
+      setPerfilLogado(p);
+      carregarDadosBase(p, p.id);
+    } else {
+      // Se não tem dados, apenas mostra "Perfil Desconhecido" na tela para não travar
+      setPerfilLogado({ nome: 'Desconhecido' });
+    }
   };
 
   const carregarLancamentosLocais = async () => {
@@ -161,16 +138,15 @@ export default function HomeScreen() {
       const { data: colabs, error: errColab } = await supabase.from('colaboradores').select('*').order('nome');
       const { data: servs, error: errServ } = await supabase.from('servicos').select('*').order('nome');
       const { data: mapa, error: errMapa } = await supabase.from('mapa_fazendas').select('*');
-      
-      // Busca as configurações de horário no banco
-      const { data: config } = await supabase.from('configuracoes').select('*').single();
+      const { data: config, error: errConfig } = await supabase.from('configuracoes').select('*').single();
+
+      if (errColab || errServ || errMapa) throw new Error("Sem rede");
+
       if (config) {
         setHoraInicioPermitida(config.hora_inicio);
         setHoraFimPermitida(config.hora_fim);
         await AsyncStorage.setItem('@config_horarios', JSON.stringify({ inicio: config.hora_inicio, fim: config.hora_fim }));
       }
-
-      if (errColab || errServ || errMapa) throw new Error("Sem rede");
 
       if (colabs) { setListaColaboradores(colabs); await AsyncStorage.setItem('@mochila_colaboradores', JSON.stringify(colabs)); }
       if (servs) { setListaServicos(servs); await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs)); }
@@ -179,7 +155,9 @@ export default function HomeScreen() {
         setFazendasDisponiveis([...new Set(mapa.map(item => item.fazenda))] as string[]);
         await AsyncStorage.setItem('@mochila_mapa', JSON.stringify(mapa));
       }
+      setIsOffline(false);
     } catch (error) {
+      setIsOffline(true);
       const mochilaColabs = await AsyncStorage.getItem('@mochila_colaboradores');
       const mochilaServs = await AsyncStorage.getItem('@mochila_servicos');
       const mochilaMapa = await AsyncStorage.getItem('@mochila_mapa');
@@ -239,7 +217,6 @@ export default function HomeScreen() {
     } else setQuantidade(texto);
   };
 
-  // CÂMERA
   const abrirCamera = async () => {
     if (!permissaoCamera?.granted) {
       const resposta = await pedirPermissao();
@@ -268,8 +245,7 @@ export default function HomeScreen() {
   const salvarLancamento = async () => {
     if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade) { return Alert.alert("Aviso", "Preencha todos os campos!"); }
     
-    // === TRAVA DE HORÁRIO ===
-    const horaAtual = dataHoraAtual.toLocaleTimeString('pt-BR').substring(0, 5); // Pega só HH:MM
+    const horaAtual = dataHoraAtual.toLocaleTimeString('pt-BR').substring(0, 5); 
     if (horaAtual < horaInicioPermitida || horaAtual > horaFimPermitida) {
       return Alert.alert(
         "🚫 Fora do Expediente", 
@@ -383,6 +359,7 @@ export default function HomeScreen() {
       
       await AsyncStorage.removeItem('@lancamentos_off');
       setLancamentosPendentes([]);
+      carregarDadosBase(perfilLogado, perfilLogado?.id || null);
       Alert.alert("🚀 Sincronizado com Sucesso!", "Todas as produções foram enviadas para o servidor.");
       
     } catch (e: any) {
@@ -424,6 +401,12 @@ export default function HomeScreen() {
 
   return (
     <View style={{flex: 1}}>
+      {isOffline && (
+        <View style={styles.offlineBadge}>
+          <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO - Lançamentos salvos no celular.</Text>
+        </View>
+      )}
+
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
         
         <View style={styles.topBar}>
@@ -434,9 +417,6 @@ export default function HomeScreen() {
           )}
           <TouchableOpacity onPress={() => setModalEquipeVisivel(true)} style={styles.btnEquipe}>
             <Text style={styles.btnEquipeText}>👥 Todos Colabs</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={fazerLogout} style={styles.btnLogout}>
-            <Text style={styles.btnLogoutText}>Sair</Text>
           </TouchableOpacity>
         </View>
 
@@ -640,12 +620,12 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#F5F7FA', padding: 20 },
+  offlineBadge: { backgroundColor: '#E74C3C', padding: 8, alignItems: 'center', justifyContent: 'center' },
+  offlineText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5, backgroundColor: '#FFF', padding: 12, borderRadius: 8, elevation: 2 },
   userText: { fontSize: 13, fontWeight: 'bold', color: '#2C3E50', flex: 1 },
   btnEquipe: { backgroundColor: '#3498DB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 5, marginRight: 8 },
   btnEquipeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
-  btnLogout: { backgroundColor: '#E74C3C', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 5 },
-  btnLogoutText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   header: { marginBottom: 20, marginTop: 10, alignItems: 'center' },
   title: { fontSize: 28, fontWeight: 'bold', color: '#2C3E50' },
   subtitle: { fontSize: 16, color: '#7F8C8D', textAlign: 'center' },
