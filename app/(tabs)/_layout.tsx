@@ -1,17 +1,15 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Drawer } from 'expo-router/drawer';
 import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../../src/supabase';
 
 export default function DrawerLayout() {
   const [isAdmin, setIsAdmin] = useState(false);
-  
-  // Estados para as travas
-  const [liberarMapa, setLiberarMapa] = useState(true);
-  const [liberarFinanceiro, setLiberarFinanceiro] = useState(false);
-  const [liberarEquipe, setLiberarEquipe] = useState(false);
+  const [permissoesAtivas, setPermissoesAtivas] = useState<any>({});
+  const [carregandoMenu, setCarregandoMenu] = useState(true);
 
   useEffect(() => {
     carregarRegras();
@@ -19,32 +17,63 @@ export default function DrawerLayout() {
 
   const carregarRegras = async () => {
     try {
-      // 1. Vê quem é o usuário
       const perfilSalvo = await AsyncStorage.getItem('@perfil_offline');
-      if (perfilSalvo) {
-        setIsAdmin(JSON.parse(perfilSalvo).cargo === 'Administrador');
+      if (!perfilSalvo) {
+        setCarregandoMenu(false);
+        return;
       }
 
-      // 2. Tenta puxar a configuração global mais atualizada do Supabase
-      const { data } = await supabase.from('configuracoes').select('*').limit(1).single();
-      if (data) {
-        setLiberarMapa(data.permitir_mapa ?? true);
-        setLiberarFinanceiro(data.permitir_financeiro ?? false);
-        setLiberarEquipe(data.permitir_equipe ?? false);
-      } else {
-        // Se estiver offline, lê a mochila do celular
-        const configOffline = await AsyncStorage.getItem('@config_global');
-        if (configOffline) {
-          const config = JSON.parse(configOffline);
-          setLiberarMapa(config.permitir_mapa ?? true);
-          setLiberarFinanceiro(config.permitir_financeiro ?? false);
-          setLiberarEquipe(config.permitir_equipe ?? false);
+      const perfil = JSON.parse(perfilSalvo);
+      const cargoDoUsuario = perfil.cargo ? perfil.cargo.trim() : '';
+      const ehAdmin = cargoDoUsuario.toLowerCase() === 'administrador';
+      
+      setIsAdmin(ehAdmin);
+
+      if (!ehAdmin && cargoDoUsuario) {
+        // 👉 BUSCA BLINDADA: Trazemos todas as regras e filtramos no JavaScript para não bugar o banco
+        const { data, error } = await supabase.from('permissoes_menu').select('*');
+        
+        if (data) {
+          // Procura o cargo ignorando maiúsculas e minúsculas
+          const regraDoCargo = data.find(item => item.cargo && item.cargo.toLowerCase() === cargoDoUsuario.toLowerCase());
+          
+          if (regraDoCargo && regraDoCargo.telas) {
+            const regras = typeof regraDoCargo.telas === 'string' ? JSON.parse(regraDoCargo.telas) : regraDoCargo.telas;
+            setPermissoesAtivas(regras);
+          } else {
+            // 👉 O DEDO-DURO: Se chegar aqui, o cargo dele não existe na tabela de permissões!
+            Alert.alert(
+              "Aviso de Acesso", 
+              `Nenhuma regra de menu encontrada para o seu cargo: "${cargoDoUsuario}". \nPeça ao Administrador para configurar no Painel.`
+            );
+          }
         }
       }
     } catch (e) {
-      console.log("Erro ao carregar regras de acesso");
+      console.log("Erro ao carregar regras de acesso do menu");
+    } finally {
+      setCarregandoMenu(false);
     }
   };
+
+  const ocultarVisul = (chaveTela: string) => {
+    if (isAdmin) return {}; // Admin vê tudo
+    
+    // Mostra se for true booleano ou "true" em texto
+    if (permissoesAtivas[chaveTela] === true || permissoesAtivas[chaveTela] === "true") {
+      return {}; 
+    }
+    
+    return { display: 'none' as const }; 
+  };
+
+  if (carregandoMenu) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#2C3E50' }}>
+        <ActivityIndicator size="large" color="#27AE60" />
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -59,12 +88,11 @@ export default function DrawerLayout() {
           drawerLabelStyle: { 
             fontSize: 16, 
             fontWeight: 'bold',
-            textTransform: 'capitalize' // 👉 Garante a primeira letra sempre Maiúscula
+            textTransform: 'capitalize' 
           }
         }}
       >
         
-        {/* TELA 1: Lançar Produção */}
         <Drawer.Screen
           name="index"
           options={{
@@ -74,52 +102,136 @@ export default function DrawerLayout() {
           }}
         />
 
-        {/* TELA 2: Mapa da Fazenda */}
         <Drawer.Screen
           name="mapa"
           options={{
             drawerLabel: 'Mapa Da Fazenda',
             title: 'Mapa',
             drawerIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
-            drawerItemStyle: (isAdmin || liberarMapa) ? {} : { display: 'none' } 
+            drawerItemStyle: ocultarVisul('mapa')
           }}
         />
 
-        {/* TELA 3: Auditoria de Fotos (Adicionada conforme as telas anteriores) */}
         <Drawer.Screen
           name="auditoria"
           options={{
             drawerLabel: 'Auditoria De Fotos',
             title: 'Auditoria',
             drawerIcon: ({ color, size }) => <Ionicons name="camera" size={size} color={color} />,
-            // Se quiser que só Admin veja a auditoria, descomente a linha abaixo:
-            // drawerItemStyle: isAdmin ? {} : { display: 'none' }
+            drawerItemStyle: ocultarVisul('auditoria')
           }}
         />
 
-        {/* TELA 4: Fechamento Financeiro */}
         <Drawer.Screen
           name="fechamento"
           options={{
             drawerLabel: 'Fechamento Financeiro',
             title: 'Financeiro',
             drawerIcon: ({ color, size }) => <Ionicons name="cash" size={size} color={color} />,
-            drawerItemStyle: (isAdmin || liberarFinanceiro) ? {} : { display: 'none' } 
+            drawerItemStyle: ocultarVisul('fechamento')
           }}
         />
 
-        {/* TELA 5: Gestão de Acessos */}
         <Drawer.Screen
           name="usuarios"
           options={{
             drawerLabel: 'Gestão De Acessos',
-            title: 'Equipe',
+            title: 'Acessos',
             drawerIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} />,
-            drawerItemStyle: (isAdmin || liberarEquipe) ? {} : { display: 'none' }
+            drawerItemStyle: ocultarVisul('usuarios')
           }}
         />
 
-        {/* TELA 6: Configurações */}
+        <Drawer.Screen
+          name="estatisticas"
+          options={{
+            drawerLabel: 'Estatísticas De Produção',
+            title: 'Dashboard',
+            drawerIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('estatisticas')
+          }}
+        />
+
+        <Drawer.Screen
+          name="ferias"
+          options={{
+            drawerLabel: 'Férias',
+            title: 'Férias',
+            drawerIcon: ({ color, size }) => <Ionicons name="airplane" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('ferias')
+          }}
+        />
+
+        <Drawer.Screen
+          name="equipes"
+          options={{
+            drawerLabel: 'Equipes',
+            title: 'Equipes',
+            drawerIcon: ({ color, size }) => <Ionicons name="people-outline" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('equipes')
+          }}
+        />
+
+        <Drawer.Screen
+          name="explore"
+          options={{
+            drawerLabel: 'Explore',
+            title: 'Explore',
+            drawerIcon: ({ color, size }) => <Ionicons name="compass" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('explore')
+          }}
+        />
+
+        <Drawer.Screen
+          name="ausencias"
+          options={{
+            drawerLabel: 'Ausências',
+            title: 'Ausências',
+            drawerIcon: ({ color, size }) => <Ionicons name="close-circle-outline" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('ausencias')
+          }}
+        />
+
+        <Drawer.Screen
+          name="cadastros"
+          options={{
+            drawerLabel: 'Cadastros',
+            title: 'Cadastros',
+            drawerIcon: ({ color, size }) => <Ionicons name="document-text" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('cadastros')
+          }}
+        />
+
+        <Drawer.Screen
+          name="relatorios"
+          options={{
+            drawerLabel: 'Relatórios',
+            title: 'Relatórios',
+            drawerIcon: ({ color, size }) => <Ionicons name="document-attach" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('relatorios')
+          }}
+        />
+
+        <Drawer.Screen
+          name="colaboradores"
+          options={{
+            drawerLabel: 'Colaboradores',
+            title: 'Colaboradores',
+            drawerIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('colaboradores')
+          }}
+        />
+
+        <Drawer.Screen
+          name="permissoes"
+          options={{
+            drawerLabel: 'Gerenciar Permissões',
+            title: 'Controle de Menu',
+            drawerIcon: ({ color, size }) => <MaterialCommunityIcons name="shield-key" size={size} color={color} />,
+            drawerItemStyle: isAdmin ? {} : { display: 'none' } 
+          }}
+        />
+
         <Drawer.Screen
           name="configuracoes"
           options={{

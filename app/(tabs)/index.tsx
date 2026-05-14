@@ -4,7 +4,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function HomeScreen() {
@@ -14,7 +14,7 @@ export default function HomeScreen() {
   
   const [fazenda, setFazenda] = useState('');
   const [quadra, setQuadra] = useState('');
-  const [ramal, setRamal] = useState('');
+  const [ramal, setRamal] = useState(''); 
   const [quantidade, setQuantidade] = useState('');
   const [valorTotalCalculado, setValorTotalCalculado] = useState(0);
   
@@ -193,12 +193,46 @@ export default function HomeScreen() {
     else setRamaisDisponiveis([]);
   }, [quadra]);
 
+  const processarRamaisMuitos = (input: string) => {
+    const listaFinal: string[] = [];
+    const partes = input.split(',');
+
+    partes.forEach(parte => {
+      const trecho = parte.trim();
+      if (trecho.includes('-')) {
+        const [inicio, fim] = trecho.split('-').map(Number);
+        if (!isNaN(inicio) && !isNaN(fim)) {
+          for (let i = inicio; i <= fim; i++) {
+            listaFinal.push(i.toString());
+          }
+        }
+      } else if (trecho !== '') {
+        listaFinal.push(trecho);
+      }
+    });
+
+    return Array.from(new Set(listaFinal));
+  };
+
   useEffect(() => {
-    if (ramal) {
-      const ramalSelecionado = ramaisDisponiveis.find(r => r.ramal === ramal);
-      if (ramalSelecionado) setLimitePes(ramalSelecionado.total_pes);
-    } else setLimitePes(null);
-  }, [ramal]);
+    const listaRamais = processarRamaisMuitos(ramal);
+    if (listaRamais.length > 0) {
+      let somaLimites = 0;
+      let encontrouAlgumComLimite = false;
+
+      listaRamais.forEach(numRamal => {
+        const ramalSelecionado = ramaisDisponiveis.find(r => r.ramal === numRamal);
+        if (ramalSelecionado && ramalSelecionado.total_pes) {
+          somaLimites += ramalSelecionado.total_pes;
+          encontrouAlgumComLimite = true;
+        }
+      });
+
+      setLimitePes(encontrouAlgumComLimite ? somaLimites : null);
+    } else {
+      setLimitePes(null);
+    }
+  }, [ramal, ramaisDisponiveis]);
 
   useEffect(() => {
     if (servicoSelecionadoCompleto && quantidade) {
@@ -212,9 +246,11 @@ export default function HomeScreen() {
   const handleMudancaQuantidade = (texto: string) => {
     const valorDigitado = parseInt(texto) || 0;
     if (limitePes !== null && valorDigitado > limitePes) {
-      alert(`⚠️ Limite do ramal é ${limitePes} pés!`);
+      Alert.alert("⚠️ Limite Atingido", `A soma máxima dos ramais selecionados é de ${limitePes} pés/tambores!`);
       setQuantidade(limitePes.toString());
-    } else setQuantidade(texto);
+    } else {
+      setQuantidade(texto);
+    }
   };
 
   const abrirCamera = async () => {
@@ -243,7 +279,9 @@ export default function HomeScreen() {
   };
 
   const salvarLancamento = async () => {
-    if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade) { return Alert.alert("Aviso", "Preencha todos os campos!"); }
+    if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade) { 
+      return Alert.alert("Aviso", "Preencha todos os campos!"); 
+    }
     
     const horaAtual = dataHoraAtual.toLocaleTimeString('pt-BR').substring(0, 5); 
     if (horaAtual < horaInicioPermitida || horaAtual > horaFimPermitida) {
@@ -257,38 +295,51 @@ export default function HomeScreen() {
       return Alert.alert("Falta a Foto!", "A auditoria visual (foto) é obrigatória para o primeiro lançamento do dia."); 
     }
 
-    const ramalInfo = ramaisDisponiveis.find(r => r.ramal === ramal);
-    const isServicoAtualCoringa = servicoSelecionadoCompleto?.is_coringa === true;
-
-    if (ramalInfo?.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
-      return Alert.alert("❌ Bloqueado", `Este ramal só aceita: ${ramalInfo.servico_permitido}. (E o serviço '${servico}' não é Coringa)`); 
+    const listaDeRamaisSelecionados = processarRamaisMuitos(ramal);
+    if (listaDeRamaisSelecionados.length === 0) {
+      return Alert.alert("Erro", "Formato de ramal inválido. Digite um número ou intervalo válido.");
     }
 
-    if (ramalInfo?.data_bloqueio) {
-      const hojeISO = dataHoraAtual.toISOString().split('T')[0];
-      if (hojeISO !== ramalInfo.data_bloqueio) { return Alert.alert("📅 Data Bloqueada", `Lançamentos permitidos apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); }
+    const isServicoAtualCoringa = servicoSelecionadoCompleto?.is_coringa === true;
+
+    for (const numRamal of listaDeRamaisSelecionados) {
+      const ramalInfo = ramaisDisponiveis.find(r => r.ramal === numRamal);
+      
+      if (ramalInfo?.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
+        return Alert.alert("❌ Bloqueado", `O ramal ${numRamal} só aceita: ${ramalInfo.servico_permitido}.`); 
+      }
+
+      if (ramalInfo?.data_bloqueio) {
+        const hojeISO = dataHoraAtual.toISOString().split('T')[0];
+        if (hojeISO !== ramalInfo.data_bloqueio) { 
+          return Alert.alert("📅 Data Bloqueada", `Lançamentos para o ramal ${numRamal} permitidos apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
+        }
+      }
     }
 
     setSalvando(true);
     let valorUnitario = servicoSelecionadoCompleto?.preco_base || 0;
     if (servicoSelecionadoCompleto?.tipo_cobranca === 'milheiro') valorUnitario = valorUnitario / 1000;
 
-    const novoLancamento = { 
-      colaborador, 
-      servico, 
-      fazenda, 
-      quadra, 
-      ramal, 
-      quantidade: parseInt(quantidade), 
-      valor_unitario: valorUnitario, 
-      valor_total: valorTotalCalculado, 
-      data: dataHoraAtual.toISOString(),
-      foto_local: fotoURI, 
-      fiscal_nome: perfilLogado?.nome || 'Fiscal Não Identificado' 
-    };
+    const quantidadePorRamal = Math.floor(parseInt(quantidade) / listaDeRamaisSelecionados.length);
+    const valorPorRamal = valorTotalCalculado / listaDeRamaisSelecionados.length;
 
     try {
-      const novaLista = [...lancamentosPendentes, novoLancamento];
+      const novosLancamentosMultiplos = listaDeRamaisSelecionados.map(numRamal => ({
+        colaborador, 
+        servico, 
+        fazenda, 
+        quadra, 
+        ramal: numRamal,
+        quantidade: quantidadePorRamal, 
+        valor_unitario: valorUnitario, 
+        valor_total: valorPorRamal, 
+        data: dataHoraAtual.toISOString(),
+        foto_local: fotoURI, 
+        fiscal_nome: perfilLogado?.nome || 'Fiscal Não Identificado' 
+      }));
+
+      const novaLista = [...lancamentosPendentes, ...novosLancamentosMultiplos];
       await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
       setLancamentosPendentes(novaLista);
 
@@ -301,7 +352,7 @@ export default function HomeScreen() {
 
       Alert.alert(
         "✅ Salvo Offline", 
-        `Lançamento de ${servico} registrado.\nValor garantido: R$ ${valorTotalCalculado.toFixed(2).replace('.', ',')}`
+        `Foram registrados ${listaDeRamaisSelecionados.length} ramais.\nValor total garantido: R$ ${valorTotalCalculado.toFixed(2).replace('.', ',')}`
       );
 
       setRamal(''); setQuantidade(''); setValorTotalCalculado(0); setFotoURI(null);
@@ -400,222 +451,237 @@ export default function HomeScreen() {
   };
 
   return (
-    <View style={{flex: 1}}>
-      {isOffline && (
-        <View style={styles.offlineBadge}>
-          <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO - Lançamentos salvos no celular.</Text>
-        </View>
-      )}
-
-      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
-        
-        <View style={styles.topBar}>
-          {perfilLogado ? (
-            <Text style={styles.userText}>👤 Fiscal: {perfilLogado.nome}</Text>
-          ) : (
-            <Text style={styles.userText}>Buscando perfil...</Text>
-          )}
-          <TouchableOpacity onPress={() => setModalEquipeVisivel(true)} style={styles.btnEquipe}>
-            <Text style={styles.btnEquipeText}>👥 Todos Colabs</Text>
-          </TouchableOpacity>
-          {/* BOTÃO DE SAIR FOI MOVIDO PARA A TELA DE CONFIGURAÇÕES */}
-        </View>
-
-        <View style={styles.header}>
-          <Text style={styles.title}>Brekaz Produção </Text>
-          <Text style={styles.subtitle}>Lançamento Livre para Todas as Equipes</Text>
-          <View style={styles.relogioBox}>
-              <Text style={styles.relogioTexto}>{dataHoraAtual.toLocaleDateString('pt-BR')} - {dataHoraAtual.toLocaleTimeString('pt-BR')}</Text>
-              <TouchableOpacity onPress={atualizarMochilaManual} style={styles.btnAtualizar}>
-                 <Text style={styles.btnAtualizarText}>🔄 Atualizar Base de Dados</Text>
-              </TouchableOpacity>
-          </View>
-        </View>
-
-        {lancamentosPendentes.length > 0 && (
-          <View style={styles.syncCard}>
-            <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} lançamentos pendentes</Text>
-            <View style={styles.syncBotoesRow}>
-              <TouchableOpacity style={styles.btnSyncVer} onPress={() => setModalPendentesVisivel(true)}>
-                <Text style={styles.btnSyncVerTexto}>✏️ VER / EDITAR</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnSync} onPress={sincronizarComBanco} disabled={sincronizando}>
-                {sincronizando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSyncTexto}>🚀 ENVIAR TUDO</Text>}
-              </TouchableOpacity>
-            </View>
+    <KeyboardAvoidingView 
+      style={{ flex: 1 }} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={{flex: 1}}>
+        {isOffline && (
+          <View style={styles.offlineBadge}>
+            <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO - Lançamentos salvos no celular.</Text>
           </View>
         )}
 
-        <View style={styles.card}>
-          {carregandoDados ? (
-            <ActivityIndicator size="large" color="#27AE60" />
-          ) : (
-            <>
-              <Text style={styles.label}>Colaborador:</Text>
-              <View style={styles.pickerContainer}>
-                <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
-                  <Picker.Item label="Quem está trabalhando?" value="" />
-                  {listaColaboradores.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
-                </Picker>
-              </View>
+        {/* 👉 ADICIONADO keyboardShouldPersistTaps para facilitar o clique no botão Salvar */}
+        <ScrollView 
+          style={styles.container} 
+          contentContainerStyle={{ paddingBottom: 150 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          
+          <View style={styles.topBar}>
+            {perfilLogado ? (
+              <Text style={styles.userText}>👤 {perfilLogado.cargo}: {perfilLogado.nome}</Text>
+            ) : (
+              <Text style={styles.userText}>Buscando perfil...</Text>
+            )}
+            <TouchableOpacity onPress={() => setModalEquipeVisivel(true)} style={styles.btnEquipe}>
+              <Text style={styles.btnEquipeText}>👥 Todos Colabs</Text>
+            </TouchableOpacity>
+          </View>
 
-              <Text style={styles.label}>Serviço:</Text>
-              <View style={styles.pickerContainer}>
-                <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
-                  <Picker.Item label="Qual o serviço?" value="" />
-                  {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
-                </Picker>
-              </View>
+          <View style={styles.header}>
+            <Text style={styles.title}>Brekaz Produção </Text>
+            <Text style={styles.subtitle}>Lançamento Livre para Todas as Equipes</Text>
+            <View style={styles.relogioBox}>
+                <Text style={styles.relogioTexto}>{dataHoraAtual.toLocaleDateString('pt-BR')} - {dataHoraAtual.toLocaleTimeString('pt-BR')}</Text>
+                <TouchableOpacity onPress={atualizarMochilaManual} style={styles.btnAtualizar}>
+                   <Text style={styles.btnAtualizarText}>🔄 Atualizar Base de Dados</Text>
+                </TouchableOpacity>
+            </View>
+          </View>
 
-              <Text style={styles.label}>Fazenda:</Text>
-              <View style={styles.pickerContainer}>
-                <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
-                  <Picker.Item label="Selecione a fazenda..." value="" />
-                  {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
-                </Picker>
+          {lancamentosPendentes.length > 0 && (
+            <View style={styles.syncCard}>
+              <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} lançamentos pendentes</Text>
+              <View style={styles.syncBotoesRow}>
+                <TouchableOpacity style={styles.btnSyncVer} onPress={() => setModalPendentesVisivel(true)}>
+                  <Text style={styles.btnSyncVerTexto}>✏️ VER / EDITAR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.btnSync} onPress={sincronizarComBanco} disabled={sincronizando}>
+                  {sincronizando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSyncTexto}>🚀 ENVIAR TUDO</Text>}
+                </TouchableOpacity>
               </View>
+            </View>
+          )}
 
-              <View style={styles.row}>
-                <View style={styles.col}>
-                  <Text style={styles.label}>Quadra:</Text>
-                  <View style={[styles.pickerContainer, !fazenda && styles.disabled]}><Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}><Picker.Item label="..." value="" />{quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}</Picker></View>
+          <View style={styles.card}>
+            {carregandoDados ? (
+              <ActivityIndicator size="large" color="#27AE60" />
+            ) : (
+              <>
+                <Text style={styles.label}>Colaborador:</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
+                    <Picker.Item label="Quem está trabalhando?" value="" />
+                    {listaColaboradores.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
+                  </Picker>
                 </View>
-                <View style={styles.col}>
-                  <Text style={styles.label}>Ramal:</Text>
-                  <View style={[styles.pickerContainer, !quadra && styles.disabled]}><Picker enabled={!!quadra} selectedValue={ramal} onValueChange={setRamal} style={styles.picker}><Picker.Item label="..." value="" />{ramaisDisponiveis.map((r, i) => (<Picker.Item key={i} label={r.ramal} value={r.ramal} />))}</Picker></View>
+
+                <Text style={styles.label}>Serviço:</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
+                    <Picker.Item label="Qual o serviço?" value="" />
+                    {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
+                  </Picker>
                 </View>
-              </View>
 
-              <Text style={styles.label}>Quantidade (Pés):</Text>
-              <TextInput style={[styles.input, !ramal && styles.disabledInput]} placeholder="0" keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} />
-
-              {valorTotalCalculado > 0 && (
-                <View style={styles.cardGanho}>
-                  <Text style={styles.textoGanho}>Valor deste lançamento:</Text>
-                  <Text style={styles.valorGanho}>R$ {valorTotalCalculado.toFixed(2).replace('.', ',')}</Text>
+                <Text style={styles.label}>Fazenda:</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
+                    <Picker.Item label="Selecione a fazenda..." value="" />
+                    {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                  </Picker>
                 </View>
-              )}
 
-              {colaborador ? (
-                <View style={styles.areaCamera}>
-                  {fotoJaTirada ? (
-                    <View style={[styles.fotoSucessoCard, { borderColor: '#3498DB', backgroundColor: '#EBF5FB' }]}>
-                      <Text style={{ fontSize: 24, marginHorizontal: 10 }}>🛡️</Text>
-                      <View style={{flex: 1}}>
-                        <Text style={{ color: '#2980B9', fontWeight: 'bold', fontSize: 14 }}>Auditoria já concluída hoje!</Text>
-                        <Text style={{ color: '#7F8C8D', fontSize: 11 }}>Não é necessário tirar nova foto para este colaborador.</Text>
+                <View style={styles.row}>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Quadra:</Text>
+                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}><Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}><Picker.Item label="..." value="" />{quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}</Picker></View>
+                  </View>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Ramal (Ex: 1-4 ou 1,3):</Text>
+                    <TextInput 
+                      style={[styles.input, !quadra && styles.disabledInput, { height: 50, padding: 10, fontSize: 16 }]} 
+                      placeholder="1, 2, 3" 
+                      value={ramal} 
+                      onChangeText={setRamal} 
+                      editable={!!quadra} 
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.label}>Quantidade (Pés / Tambores):</Text>
+                <TextInput style={[styles.input, !ramal && styles.disabledInput]} placeholder="Soma total dos ramais" keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} />
+
+                {valorTotalCalculado > 0 && (
+                  <View style={styles.cardGanho}>
+                    <Text style={styles.textoGanho}>Valor deste lançamento:</Text>
+                    <Text style={styles.valorGanho}>R$ {valorTotalCalculado.toFixed(2).replace('.', ',')}</Text>
+                  </View>
+                )}
+
+                {colaborador ? (
+                  <View style={styles.areaCamera}>
+                    {fotoJaTirada ? (
+                      <View style={[styles.fotoSucessoCard, { borderColor: '#3498DB', backgroundColor: '#EBF5FB' }]}>
+                        <Text style={{ fontSize: 24, marginHorizontal: 10 }}>🛡️</Text>
+                        <View style={{flex: 1}}>
+                          <Text style={{ color: '#2980B9', fontWeight: 'bold', fontSize: 14 }}>Auditoria já concluída hoje!</Text>
+                          <Text style={{ color: '#7F8C8D', fontSize: 11 }}>Não é necessário tirar nova foto para este colaborador.</Text>
+                        </View>
                       </View>
+                    ) : fotoURI ? (
+                      <View style={styles.fotoSucessoCard}>
+                        <Image source={{ uri: fotoURI }} style={styles.miniFoto} />
+                        <View style={{flex: 1, marginLeft: 15}}>
+                          <Text style={styles.fotoSucessoTexto}>✅ Foto Registrada!</Text>
+                          <TouchableOpacity onPress={() => setFotoURI(null)}>
+                            <Text style={styles.fotoRefazerTexto}>Excluir e Tirar Outra</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.btnCamera} onPress={abrirCamera}>
+                        <Text style={styles.btnCameraTexto}>📸 TIRAR FOTO (OBRIGATÓRIO)</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : null}
+
+                <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
+                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR PARA ENVIO</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </ScrollView>
+
+        {/* MODAL DA CÂMERA EM TELA CHEIA */}
+        <Modal visible={cameraVisivel} transparent={false} animationType="slide">
+          <View style={styles.modalCameraContainer}>
+            <CameraView style={styles.cameraVisor} facing="front" ref={cameraRef}>
+              <View style={styles.cameraInterface}>
+                <View style={styles.molduraRosto}>
+                  <Text style={styles.textoMoldura}>Centralize o Rosto</Text>
+                </View>
+                
+                <View style={styles.cameraBotoesBarra}>
+                  <TouchableOpacity style={styles.btnFecharCamera} onPress={() => setCameraVisivel(false)}>
+                    <Text style={styles.textoBotaoCamera}>Cancelar</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.btnCapturar} onPress={tirarFoto}>
+                    <View style={styles.btnCapturarMiolo} />
+                  </TouchableOpacity>
+
+                  <View style={{ width: 80 }} /> 
+                </View>
+              </View>
+            </CameraView>
+          </View>
+        </Modal>
+
+        {/* MODAL 1: LISTA DA EQUIPE */}
+        <Modal visible={modalEquipeVisivel} transparent={true} animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Lista Geral ({listaColaboradores.length})</Text>
+              <ScrollView style={{maxHeight: 400}}>
+                {listaColaboradores.length === 0 ? (
+                  <Text style={styles.textoVazio}>Ninguém cadastrado no sistema.</Text>
+                ) : (
+                  listaColaboradores.map(c => (
+                    <View key={c.id} style={styles.itemEquipe}>
+                      <Text style={styles.nomeEquipe}>👷 {c.nome}</Text>
                     </View>
-                  ) : fotoURI ? (
-                    <View style={styles.fotoSucessoCard}>
-                      <Image source={{ uri: fotoURI }} style={styles.miniFoto} />
-                      <View style={{flex: 1, marginLeft: 15}}>
-                        <Text style={styles.fotoSucessoTexto}>✅ Foto Registrada!</Text>
-                        <TouchableOpacity onPress={() => setFotoURI(null)}>
-                          <Text style={styles.fotoRefazerTexto}>Excluir e Tirar Outra</Text>
+                  ))
+                )}
+              </ScrollView>
+              <TouchableOpacity style={styles.btnFecharModal} onPress={() => setModalEquipeVisivel(false)}>
+                <Text style={styles.btnFecharTexto}>FECHAR</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* MODAL 2: EDITAR/EXCLUIR PENDENTES */}
+        <Modal visible={modalPendentesVisivel} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContentGrande}>
+              <Text style={styles.modalTitle}>Lançamentos Pendentes</Text>
+              <ScrollView style={{maxHeight: 500}}>
+                {lancamentosPendentes.length === 0 ? (
+                  <Text style={styles.textoVazio}>Nenhum lançamento offline.</Text>
+                ) : (
+                  lancamentosPendentes.map((item, index) => (
+                    <View key={index} style={styles.itemPendente}>
+                      <View style={styles.itemInfo}>
+                        <Text style={styles.itemColab}>{item.colaborador}</Text>
+                        <Text style={styles.itemDetalhes}>{item.servico} | Ramal: {item.ramal}</Text>
+                        <Text style={styles.itemDetalhes}>Qtd: {item.quantidade} | R$ {item.valor_total.toFixed(2)}</Text>
+                        {item.foto_local && <Text style={{fontSize: 10, color: '#27AE60'}}>📸 Foto Anexada</Text>}
+                      </View>
+                      <View style={styles.itemAcoes}>
+                        <TouchableOpacity style={styles.btnEditarPendente} onPress={() => editarLancamentoPendente(index)}>
+                          <Text style={styles.btnAcaoTexto}>✏️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.btnApagarPendente} onPress={() => excluirLancamentoPendente(index)}>
+                          <Text style={styles.btnAcaoTexto}>🗑️</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
-                  ) : (
-                    <TouchableOpacity style={styles.btnCamera} onPress={abrirCamera}>
-                      <Text style={styles.btnCameraTexto}>📸 TIRAR FOTO (OBRIGATÓRIO)</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ) : null}
-
-              <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
-                {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR PARA ENVIO</Text>}
+                  ))
+                )}
+              </ScrollView>
+              <TouchableOpacity style={styles.btnFecharModal} onPress={() => setModalPendentesVisivel(false)}>
+                <Text style={styles.btnFecharTexto}>VOLTAR</Text>
               </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </ScrollView>
-
-      {/* MODAL DA CÂMERA EM TELA CHEIA */}
-      <Modal visible={cameraVisivel} transparent={false} animationType="slide">
-        <View style={styles.modalCameraContainer}>
-          <CameraView style={styles.cameraVisor} facing="front" ref={cameraRef}>
-            <View style={styles.cameraInterface}>
-              <View style={styles.molduraRosto}>
-                <Text style={styles.textoMoldura}>Centralize o Rosto</Text>
-              </View>
-              
-              <View style={styles.cameraBotoesBarra}>
-                <TouchableOpacity style={styles.btnFecharCamera} onPress={() => setCameraVisivel(false)}>
-                  <Text style={styles.textoBotaoCamera}>Cancelar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.btnCapturar} onPress={tirarFoto}>
-                  <View style={styles.btnCapturarMiolo} />
-                </TouchableOpacity>
-
-                <View style={{ width: 80 }} /> 
-              </View>
             </View>
-          </CameraView>
-        </View>
-      </Modal>
-
-      {/* MODAL 1: LISTA DA EQUIPE */}
-      <Modal visible={modalEquipeVisivel} transparent={true} animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Lista Geral ({listaColaboradores.length})</Text>
-            <ScrollView style={{maxHeight: 400}}>
-              {listaColaboradores.length === 0 ? (
-                <Text style={styles.textoVazio}>Ninguém cadastrado no sistema.</Text>
-              ) : (
-                listaColaboradores.map(c => (
-                  <View key={c.id} style={styles.itemEquipe}>
-                    <Text style={styles.nomeEquipe}>👷 {c.nome}</Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-            <TouchableOpacity style={styles.btnFecharModal} onPress={() => setModalEquipeVisivel(false)}>
-              <Text style={styles.btnFecharTexto}>FECHAR</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
-
-      {/* MODAL 2: EDITAR/EXCLUIR PENDENTES */}
-      <Modal visible={modalPendentesVisivel} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContentGrande}>
-            <Text style={styles.modalTitle}>Lançamentos Pendentes</Text>
-            <ScrollView style={{maxHeight: 500}}>
-              {lancamentosPendentes.length === 0 ? (
-                <Text style={styles.textoVazio}>Nenhum lançamento offline.</Text>
-              ) : (
-                lancamentosPendentes.map((item, index) => (
-                  <View key={index} style={styles.itemPendente}>
-                    <View style={styles.itemInfo}>
-                      <Text style={styles.itemColab}>{item.colaborador}</Text>
-                      <Text style={styles.itemDetalhes}>{item.servico} | Ramal: {item.ramal}</Text>
-                      <Text style={styles.itemDetalhes}>Qtd: {item.quantidade} | R$ {item.valor_total.toFixed(2)}</Text>
-                      {item.foto_local && <Text style={{fontSize: 10, color: '#27AE60'}}>📸 Foto Anexada</Text>}
-                    </View>
-                    <View style={styles.itemAcoes}>
-                      <TouchableOpacity style={styles.btnEditarPendente} onPress={() => editarLancamentoPendente(index)}>
-                        <Text style={styles.btnAcaoTexto}>✏️</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.btnApagarPendente} onPress={() => excluirLancamentoPendente(index)}>
-                        <Text style={styles.btnAcaoTexto}>🗑️</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-            <TouchableOpacity style={styles.btnFecharModal} onPress={() => setModalPendentesVisivel(false)}>
-              <Text style={styles.btnFecharTexto}>VOLTAR</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 

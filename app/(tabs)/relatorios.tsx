@@ -9,9 +9,10 @@ export default function RelatoriosScreen() {
   const [colaboradorSelecionado, setColaboradorSelecionado] = useState('');
   const [encarregado, setEncarregado] = useState('Mario Rodrigues Valentin');
   
-  // DATAS
+  // DATAS E FERIADOS
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
+  const [feriados, setFeriados] = useState('');
 
   const [listaColaboradores, setListaColaboradores] = useState<any[]>([]);
   const [gerando, setGerando] = useState(false);
@@ -20,7 +21,7 @@ export default function RelatoriosScreen() {
   useEffect(() => {
     carregarColaboradores();
     
-    // Sugere o mês atual preenchido automaticamente (ex: 01/04/2026 e 30/04/2026)
+    // Sugere o mês atual preenchido automaticamente
     const hoje = new Date();
     const primeiroDia = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
     const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
@@ -36,13 +37,19 @@ export default function RelatoriosScreen() {
     setCarregando(false);
   };
 
-  // Função para converter "DD/MM/YYYY" para "YYYY-MM-DD" que o banco de dados entende
   const converterDataParaBanco = (dataBR: string) => {
     const partes = dataBR.split('/');
     if (partes.length === 3) {
       return `${partes[2]}-${partes[1]}-${partes[0]}`;
     }
     return null;
+  };
+
+  const formatarDataIso = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   };
 
   const gerarPDF = async () => {
@@ -54,10 +61,11 @@ export default function RelatoriosScreen() {
 
     if (!dtInicioBD || !dtFimBD) return Alert.alert('Erro', 'Use o formato DD/MM/AAAA para as datas.');
 
+    const arrayFeriados = feriados.split(',').map(d => d.trim().padStart(2, '0')).filter(d => d !== '00');
+
     setGerando(true);
 
     try {
-      // 1. Busca todos os lançamentos
       let query = supabase.from('diarios_campo').select('*')
         .gte('data', `${dtInicioBD} 00:00:00`)
         .lte('data', `${dtFimBD} 23:59:59`)
@@ -75,7 +83,6 @@ export default function RelatoriosScreen() {
         return Alert.alert('Aviso', 'Nenhum lançamento encontrado neste período.');
       }
 
-      // 2. Busca o histórico de férias (MÁGICA NOVA AQUI)
       const { data: feriasDB } = await supabase.from('ferias').select('*');
 
       const estaDeFerias = (nome: string, dataLancamento: string) => {
@@ -87,7 +94,6 @@ export default function RelatoriosScreen() {
         );
       };
 
-      // 3. AGRUPAMENTO DUPLO (Por Colaborador E Por Tipo - Registrado/Diária)
       const agrupado = lancamentos.reduce((acc: any, item: any) => {
         const tipoFolha = estaDeFerias(item.colaborador, item.data) ? 'Diaria' : 'Registrado';
         const chaveAgrupamento = `${item.colaborador}_${tipoFolha}`;
@@ -103,36 +109,69 @@ export default function RelatoriosScreen() {
         return acc;
       }, {});
 
-      // 4. Gera as páginas HTML
       const chavesFolhas = Object.keys(agrupado);
       let paginasHTML = '';
 
       chavesFolhas.forEach((chave, index) => {
         const folha = agrupado[chave];
+        
         const totalGeral = folha.registros.reduce((soma: number, item: any) => soma + (item.valor_total || 0), 0);
+        const totalQuantidade = folha.registros.reduce((soma: number, item: any) => soma + (Number(item.quantidade) || 0), 0);
 
         let linhasTabela = '';
-        folha.registros.forEach((item: any) => {
-          const dataObj = new Date(item.data);
-          const dia = dataObj.getDate().toString().padStart(2, '0');
-          const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
-          const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
+        
+        let dataAtualLoop = new Date(`${dtInicioBD}T12:00:00`);
+        const dataFimLoop = new Date(`${dtFimBD}T12:00:00`);
 
-          linhasTabela += `
-            <tr>
-              <td>${dia}</td>
-              <td>${item.servico}</td>
-              <td>${item.fazenda}</td>
-              <td>${item.quadra}</td>
-              <td>${item.ramal}</td>
-              <td>${item.quantidade}</td>
-              <td>${valorUni}</td>
-              <td>R$ ${valorTot}</td>
-            </tr>
-          `;
-        });
+        while (dataAtualLoop <= dataFimLoop) {
+          const isoDate = formatarDataIso(dataAtualLoop);
+          const diaDaSemana = dataAtualLoop.getDay(); 
+          const diaMesStr = isoDate.split('-')[2];
 
-        // HTML de UMA PÁGINA
+          const registrosDoDia = folha.registros.filter((r: any) => r.data.startsWith(isoDate));
+
+          if (registrosDoDia.length > 0) {
+            registrosDoDia.forEach((item: any) => {
+              const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
+              const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
+              linhasTabela += `
+                <tr>
+                  <td>${diaMesStr}</td>
+                  <td>${item.servico || '-'}</td>
+                  <td>${item.fazenda || '-'}</td>
+                  <td>${item.quadra || '-'}</td>
+                  <td>${item.ramal || '-'}</td>
+                  <td>${item.quantidade || '-'}</td>
+                  <td>${valorUni}</td>
+                  <td>R$ ${valorTot}</td>
+                </tr>
+              `;
+            });
+          } else {
+            // 👉 LÓGICA DE FALTAS, FÉRIAS E FERIADOS
+            const isFeriado = arrayFeriados.includes(diaMesStr);
+            const isFerias = feriasDB?.some((f: any) => 
+              f.colaborador_nome === folha.nome && 
+              isoDate >= f.data_inicio && 
+              isoDate <= f.data_fim
+            );
+            
+            if (isFerias) {
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FEF9E7; color: #F39C12; font-weight: bold; letter-spacing: 2px;">FÉRIAS</td></tr>`;
+            } else if (isFeriado) {
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FADBD8; color: #C0392B; font-weight: bold; letter-spacing: 2px;">FERIADO</td></tr>`;
+            } else if (diaDaSemana === 0) {
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EAEDED; color: #7F8C8D; font-weight: bold; letter-spacing: 2px;">DOMINGO</td></tr>`;
+            } else if (diaDaSemana === 6) {
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EBF5FB; color: #2980B9; font-weight: bold; letter-spacing: 2px;">SÁBADO</td></tr>`;
+            } else {
+              // 👉 SE NÃO BATEU EM NENHUMA REGRA ACIMA, É FALTA!
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FDEDEC; color: #E74C3C; font-weight: bold; letter-spacing: 2px;">FALTA</td></tr>`;
+            }
+          }
+          dataAtualLoop.setDate(dataAtualLoop.getDate() + 1);
+        }
+
         const pagina = `
           <div class="page-container">
             <div class="header-container">
@@ -173,8 +212,7 @@ export default function RelatoriosScreen() {
                 <p style="margin-top: 40px; font-size: 12px; font-style: italic;">declaro ter recebido os valores acima</p>
               </div>
               <div class="footer-totals">
-                <p>Total: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
-                <p>Vale: <strong>R$ _________</strong></p>
+                <p style="font-size: 15px; margin-bottom: 8px;">Total Produzido: <strong>${totalQuantidade}</strong></p>
                 <p style="font-size: 18px;">A receber: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
               </div>
             </div>
@@ -202,11 +240,11 @@ export default function RelatoriosScreen() {
               .header-left p, .header-right p { margin: 4px 0; font-size: 14px; }
               .header-right { text-align: right; }
               table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-              th, td { border: 1px solid #000; padding: 8px 4px; text-align: center; font-size: 12px; }
-              th { background-color: #E8E8E8; font-weight: bold; text-transform: uppercase; }
+              th, td { border: 1px solid #000; padding: 6px 4px; text-align: center; font-size: 11px; }
+              th { background-color: #E8E8E8; font-weight: bold; text-transform: uppercase; font-size: 10px; }
               tr:nth-child(even) { background-color: #F9F9F9; }
               .footer-container { display: flex; justify-content: space-between; margin-top: 30px; }
-              .footer-totals p { margin: 6px 0; font-size: 14px; }
+              .footer-totals p { margin: 4px 0; text-align: right; }
               .signature-area { margin-top: 80px; text-align: center; page-break-inside: avoid; }
             </style>
           </head>
@@ -237,7 +275,6 @@ export default function RelatoriosScreen() {
         <Text style={styles.label}>Nome do Encarregado:</Text>
         <TextInput style={styles.input} value={encarregado} onChangeText={setEncarregado} />
 
-        {/* CAMPO DE DATAS */}
         <View style={styles.row}>
           <View style={styles.col}>
             <Text style={styles.label}>Data Inicial:</Text>
@@ -248,6 +285,15 @@ export default function RelatoriosScreen() {
             <TextInput style={styles.input} value={dataFim} onChangeText={setDataFim} placeholder="DD/MM/AAAA" keyboardType="numeric" />
           </View>
         </View>
+
+        <Text style={styles.label}>Feriados no mês (Apenas os dias):</Text>
+        <TextInput 
+          style={styles.input} 
+          value={feriados} 
+          onChangeText={setFeriados} 
+          placeholder="Ex: 01, 15, 21 (Deixe em branco se não houver)" 
+          keyboardType="numbers-and-punctuation" 
+        />
 
         <Text style={styles.label}>Selecione o Colaborador:</Text>
         {carregando ? (
@@ -279,8 +325,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#7F8C8D', marginTop: 5 },
   card: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 15, elevation: 5 },
   label: { fontSize: 14, fontWeight: '700', color: '#34495E', marginBottom: 10, marginTop: 10 },
-  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#F8FAFC', color: '#2C3E50', marginBottom: 15 },
-  pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden', marginBottom: 25 },
+  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#F8FAFC', color: '#2C3E50', marginBottom: 10 },
+  pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden', marginBottom: 25, marginTop: 10 },
   picker: { height: 50, width: '100%', borderWidth: 0, backgroundColor: 'transparent' },
   button: { backgroundColor: '#2980B9', padding: 15, borderRadius: 8, alignItems: 'center' },
   buttonDisabled: { backgroundColor: '#AED6F1' },
