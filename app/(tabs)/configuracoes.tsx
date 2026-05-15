@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function ConfiguracoesScreen() {
@@ -9,10 +9,6 @@ export default function ConfiguracoesScreen() {
   const [horaFim, setHoraFim] = useState('');
   const [configId, setConfigId] = useState<number | null>(null);
   
-  const [permitirMapa, setPermitirMapa] = useState(true);
-  const [permitirFinanceiro, setPermitirFinanceiro] = useState(false);
-  const [permitirEquipe, setPermitirEquipe] = useState(false);
-
   const [isAdmin, setIsAdmin] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -37,13 +33,10 @@ export default function ConfiguracoesScreen() {
   const carregarConfiguracoes = async () => {
     setCarregando(true);
     try {
-      const { data, error } = await supabase.from('configuracoes').select('*').limit(1).single();
+      const { data } = await supabase.from('configuracoes').select('*').limit(1).single();
       if (data) {
         setHoraInicio(data.hora_inicio);
         setHoraFim(data.hora_fim);
-        setPermitirMapa(data.permitir_mapa ?? true);
-        setPermitirFinanceiro(data.permitir_financeiro ?? false);
-        setPermitirEquipe(data.permitir_equipe ?? false);
         setConfigId(data.id);
         
         await AsyncStorage.setItem('@config_global', JSON.stringify(data));
@@ -69,10 +62,7 @@ export default function ConfiguracoesScreen() {
     
     const dadosParaSalvar = {
       hora_inicio: horaInicio, 
-      hora_fim: horaFim,
-      permitir_mapa: permitirMapa,
-      permitir_financeiro: permitirFinanceiro,
-      permitir_equipe: permitirEquipe
+      hora_fim: horaFim
     };
 
     try {
@@ -83,16 +73,32 @@ export default function ConfiguracoesScreen() {
       }
       
       await AsyncStorage.setItem('@config_global', JSON.stringify(dadosParaSalvar));
-      Alert.alert("✅ Sucesso", "Configurações atualizadas!");
+      Alert.alert("✅ Sucesso", "Expediente atualizado para toda a equipe!");
       carregarConfiguracoes();
     } catch (e) {
-      Alert.alert("Erro", "Falha ao salvar.");
+      Alert.alert("Erro", "Falha ao salvar o expediente.");
     } finally {
       setSalvando(false);
     }
   };
 
-  const fazerLogout = () => {
+  // 👇 TRAVA DE SEGURANÇA ATIVADA AQUI
+  const fazerLogout = async () => {
+    try {
+      const pendentesStr = await AsyncStorage.getItem('@lancamentos_off');
+      if (pendentesStr) {
+        const pendentes = JSON.parse(pendentesStr);
+        if (pendentes.length > 0) {
+          return Alert.alert(
+            "⚠️ Ação Bloqueada", 
+            `Você tem ${pendentes.length} lançamentos offline guardados no celular!\n\nConecte-se à internet e aperte "ENVIAR TUDO" na tela de Início antes de encerrar seu turno, ou você perderá essa produção.`
+          );
+        }
+      }
+    } catch (e) {
+      console.log("Erro ao checar mochila");
+    }
+
     Alert.alert("Encerrar Turno", "Deseja realmente sair do sistema?", [
       { text: "Cancelar", style: "cancel" },
       { 
@@ -121,12 +127,12 @@ export default function ConfiguracoesScreen() {
   return (
     <ScrollView 
       style={styles.container} 
-      contentContainerStyle={styles.scrollContent} // Estilo ajustado aqui
+      contentContainerStyle={styles.scrollContent} 
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
         <Text style={styles.title}>Configurações ⚙️</Text>
-        <Text style={styles.subtitle}>Gerenciamento da Fazenda</Text>
+        <Text style={styles.subtitle}>Gerenciamento do Aplicativo</Text>
       </View>
 
       {carregando ? (
@@ -134,50 +140,54 @@ export default function ConfiguracoesScreen() {
       ) : (
         <View style={styles.mainContent}>
           <View style={styles.card}>
-            <Text style={styles.formTitle}>⏱️ Expediente</Text>
+            <Text style={styles.formTitle}>⏱️ Horário de Expediente</Text>
+            
+            {!isAdmin && (
+              <Text style={styles.avisoNaoAdmin}>
+                Apenas o Administrador pode alterar os horários de bloqueio de lançamentos.
+              </Text>
+            )}
+
             <View style={styles.row}>
               <View style={styles.col}>
-                <Text style={styles.label}>Início:</Text>
-                <TextInput style={styles.input} value={horaInicio} onChangeText={(t) => setHoraInicio(aplicarMascaraHora(t))} placeholder="06:00" keyboardType="numeric" maxLength={5} />
+                <Text style={styles.label}>Hora Inicial:</Text>
+                <TextInput 
+                  style={[styles.input, !isAdmin && styles.inputBloqueado]} 
+                  value={horaInicio} 
+                  onChangeText={(t) => setHoraInicio(aplicarMascaraHora(t))} 
+                  placeholder="06:00" 
+                  keyboardType="numeric" 
+                  maxLength={5} 
+                  editable={isAdmin} 
+                />
               </View>
               <View style={styles.col}>
-                <Text style={styles.label}>Fim:</Text>
-                <TextInput style={styles.input} value={horaFim} onChangeText={(t) => setHoraFim(aplicarMascaraHora(t))} placeholder="18:00" keyboardType="numeric" maxLength={5} />
+                <Text style={styles.label}>Hora Final:</Text>
+                <TextInput 
+                  style={[styles.input, !isAdmin && styles.inputBloqueado]} 
+                  value={horaFim} 
+                  onChangeText={(t) => setHoraFim(aplicarMascaraHora(t))} 
+                  placeholder="18:00" 
+                  keyboardType="numeric" 
+                  maxLength={5} 
+                  editable={isAdmin}
+                />
               </View>
             </View>
+
+            {isAdmin && (
+              <TouchableOpacity style={styles.buttonSave} onPress={handleSalvar} disabled={salvando}>
+                {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>SALVAR NOVO EXPEDIENTE</Text>}
+              </TouchableOpacity>
+            )}
           </View>
 
-          {isAdmin && (
-            <View style={[styles.card, { marginTop: 15 }]}>
-              <Text style={styles.formTitle}>🔒 Permissões dos Fiscais</Text>
-              
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Visualizar Mapa</Text>
-                <Switch value={permitirMapa} onValueChange={setPermitirMapa} trackColor={{ false: '#BDC3C7', true: '#27AE60' }} />
-              </View>
-
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Ver Financeiro</Text>
-                <Switch value={permitirFinanceiro} onValueChange={setPermitirFinanceiro} trackColor={{ false: '#BDC3C7', true: '#27AE60' }} />
-              </View>
-
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Gerenciar Equipe</Text>
-                <Switch value={permitirEquipe} onValueChange={setPermitirEquipe} trackColor={{ false: '#BDC3C7', true: '#27AE60' }} />
-              </View>
-            </View>
-          )}
-
-          <TouchableOpacity style={styles.buttonSave} onPress={handleSalvar} disabled={salvando}>
-            {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>SALVAR ALTERAÇÕES</Text>}
-          </TouchableOpacity>
-
-          {/* SESSÃO DE LOGOUT DENTRO DO FLUXO DE SCROLL COM MARGEM EXTRA */}
+          {/* SESSÃO DE LOGOUT (Liberada para todos, mas bloqueada se tiver lançamentos) */}
           <View style={styles.logoutSection}>
             <View style={styles.divider} />
-            <Text style={styles.logoutNote}>Deseja trocar de usuário?</Text>
+            <Text style={styles.logoutNote}>Seu turno acabou? Lembre-se de sincronizar seus dados antes de sair.</Text>
             <TouchableOpacity style={styles.btnSair} onPress={fazerLogout} disabled={saindo}>
-               {saindo ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSairTexto}>ENCERRAR TURNO</Text>}
+               {saindo ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSairTexto}>ENCERRAR TURNO (SAIR)</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -188,7 +198,7 @@ export default function ConfiguracoesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7FA' },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 }, // Aumento do padding inferior para o scroll fluir
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 }, 
   header: { marginTop: 50, marginBottom: 25, alignItems: 'center' },
   title: { fontSize: 26, fontWeight: 'bold', color: '#2C3E50' },
   subtitle: { fontSize: 15, color: '#7F8C8D' },
@@ -197,14 +207,13 @@ const styles = StyleSheet.create({
   formTitle: { fontSize: 16, fontWeight: 'bold', color: '#E74C3C', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F2F2F2', paddingBottom: 8 },
   label: { fontSize: 13, color: '#34495E', marginBottom: 5, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 10, fontSize: 18, backgroundColor: '#F9FBFF', textAlign: 'center', color: '#2C3E50' },
+  inputBloqueado: { backgroundColor: '#EAECEE', color: '#7F8C8D' },
+  avisoNaoAdmin: { fontSize: 12, color: '#E67E22', marginBottom: 15, fontStyle: 'italic', textAlign: 'center' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '47%' },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F8F9FA' },
-  switchLabel: { fontSize: 14, color: '#2C3E50', fontWeight: '500' },
-  buttonSave: { backgroundColor: '#2C3E50', paddingVertical: 15, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+  buttonSave: { backgroundColor: '#2C3E50', paddingVertical: 15, borderRadius: 8, alignItems: 'center', marginTop: 25 },
   buttonText: { color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' },
   
-  // Estilos da Sessão de Sair Ajustados
   logoutSection: { marginTop: 40, paddingBottom: 20 },
   divider: { height: 1, backgroundColor: '#E0E6ED', width: '100%', marginBottom: 20 },
   logoutNote: { textAlign: 'center', color: '#95A5A6', fontSize: 12, marginBottom: 15 },

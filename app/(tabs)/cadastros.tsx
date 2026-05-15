@@ -1,6 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
 export default function CadastrosScreen() {
@@ -11,11 +12,23 @@ export default function CadastrosScreen() {
   const [listaSetores, setListaSetores] = useState<any[]>([]); 
   const [listaMapas, setListaMapas] = useState<any[]>([]); 
 
+  // 👉 NOVO: Controle de Acesso
+  const [isAdmin, setIsAdmin] = useState(false);
+
   useEffect(() => {
+    verificarPerfil();
     carregarServicos();
     carregarSetores();
     carregarMapas();
   }, []);
+
+  const verificarPerfil = async () => {
+    const perfilSalvo = await AsyncStorage.getItem('@perfil_offline');
+    if (perfilSalvo) {
+      const perfil = JSON.parse(perfilSalvo);
+      setIsAdmin(perfil.cargo === 'Administrador');
+    }
+  };
 
   const carregarServicos = async () => {
     const { data } = await supabase.from('servicos').select('*').order('nome');
@@ -127,6 +140,22 @@ export default function CadastrosScreen() {
       carregarServicos(); 
     } else {
       Alert.alert('Erro', error.message);
+    }
+  };
+
+  // 👉 NOVO: Função para o Admin bloquear serviços
+  const alternarBloqueioDeServico = async (id: number, bloqueadoAtual: boolean) => {
+    if (!isAdmin) {
+      return Alert.alert("Acesso Negado", "Apenas Administradores podem bloquear ou liberar serviços.");
+    }
+    
+    const novoStatus = !bloqueadoAtual;
+    setListaServicos(listaServicos.map(s => s.id === id ? { ...s, bloqueado: novoStatus } : s));
+
+    const { error } = await supabase.from('servicos').update({ bloqueado: novoStatus }).eq('id', id);
+    if (error) {
+      Alert.alert("Erro", "Falha ao mudar o status.");
+      carregarServicos(); 
     }
   };
 
@@ -366,13 +395,28 @@ export default function CadastrosScreen() {
           <View style={styles.secaoLista}>
             <Text style={styles.tituloLista}>Serviços Cadastrados ({listaServicos.length})</Text>
             {listaServicos.map(item => (
-              <View key={item.id} style={styles.itemLista}>
+              <View key={item.id} style={[styles.itemLista, item.bloqueado && { backgroundColor: '#FDEDEC', borderColor: '#E74C3C' }]}>
                 <View style={{flex: 1}}>
-                  <Text style={styles.itemNome}>{item.nome} {item.is_coringa ? '🃏' : ''}</Text>
-                  <Text style={styles.itemDetalhe}>R$ {item.preco_base?.toFixed(2)} por {item.tipo_cobranca === 'milheiro' ? '1000 Pés' : 'Unidade'}</Text>
+                  <Text style={[styles.itemNome, item.bloqueado && { color: '#C0392B', textDecorationLine: 'line-through' }]}>
+                    {item.nome} {item.is_coringa ? '🃏' : ''}
+                  </Text>
+                  <Text style={styles.itemDetalhe}>
+                    R$ {item.preco_base?.toFixed(2)} por {item.tipo_cobranca === 'milheiro' ? '1000 Pés' : 'Unidade'}
+                  </Text>
+                  {/* 👉 NOVO: Aviso visual de bloqueio */}
+                  {item.bloqueado && <Text style={{fontSize: 10, color: '#C0392B', fontWeight: 'bold', marginTop: 2}}>BLOQUEADO PARA FISCAIS</Text>}
                 </View>
                 
-                <View style={{flexDirection: 'row', gap: 15}}>
+                <View style={{flexDirection: 'row', gap: 10, alignItems: 'center'}}>
+                  {/* 👉 NOVO: Botão de Bloqueio Rápido pro Admin */}
+                  {isAdmin && (
+                    <Switch
+                      trackColor={{ false: "#27AE60", true: "#E74C3C" }} 
+                      thumbColor="#FFF"
+                      onValueChange={() => alternarBloqueioDeServico(item.id, item.bloqueado)}
+                      value={item.bloqueado === true}
+                    />
+                  )}
                   <TouchableOpacity onPress={() => iniciarEdicaoServico(item)}><Text style={styles.iconeAcao}>✏️</Text></TouchableOpacity>
                   <TouchableOpacity onPress={() => excluirServico(item.id, item.nome)}><Text style={styles.iconeAcao}>🗑️</Text></TouchableOpacity>
                 </View>

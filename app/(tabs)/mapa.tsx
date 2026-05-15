@@ -9,17 +9,37 @@ export default function MapaScreen() {
   const [totalGeralArvores, setTotalGeralArvores] = useState(0);
   const [carregando, setCarregando] = useState(true);
   
-  // NOVO: Controle de modo offline
   const [isOffline, setIsOffline] = useState(false);
-
-  // Estado para guardar os serviços que vêm do banco de dados
   const [listaServicos, setListaServicos] = useState<any[]>([]);
 
+  // 👉 NOVO: Estado para saber se o usuário pode ou não editar a fazenda
+  const [podeEditar, setPodeEditar] = useState(false);
+
   useEffect(() => {
+    verificarPerfil();
     carregarMapa();
   }, []);
 
-  // Lógica separada para não repetir código ao puxar do Banco ou da Mochila
+  const verificarPerfil = async () => {
+    try {
+      const perfilSalvo = await AsyncStorage.getItem('@perfil_offline');
+      if (perfilSalvo) {
+        const perfil = JSON.parse(perfilSalvo);
+        const cargoLimpo = perfil.cargo ? perfil.cargo.trim().toLowerCase() : '';
+        
+        // Apenas Administrador e Supervisor podem editar o mapa
+        if (cargoLimpo === 'administrador' || cargoLimpo === 'supervisor') {
+          setPodeEditar(true);
+        } else {
+          setPodeEditar(false);
+        }
+      }
+    } catch (e) {
+      console.log("Erro ao carregar perfil no mapa");
+      setPodeEditar(false);
+    }
+  };
+
   const processarDadosMapa = (data: any[]) => {
     let somaGeral = 0;
     const agrupamento: any = {};
@@ -50,7 +70,6 @@ export default function MapaScreen() {
     setCarregando(true);
     
     try {
-      // 1. Busca os serviços cadastrados no sistema
       const { data: servs, error: errServs } = await supabase.from('servicos').select('*').order('nome');
       if (errServs) throw new Error("Falha na rede");
       if (servs) {
@@ -58,7 +77,6 @@ export default function MapaScreen() {
         await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs));
       }
 
-      // 2. Busca o mapa estruturado
       const { data, error } = await supabase.from('mapa_fazendas').select('*').order('fazenda').order('quadra').order('ramal');
       if (error) throw new Error("Falha na rede");
       
@@ -67,10 +85,9 @@ export default function MapaScreen() {
         processarDadosMapa(data);
       }
       
-      setIsOffline(false); // Sucesso! Tem internet.
+      setIsOffline(false); 
 
     } catch (error) {
-      // CAIU A INTERNET: Aciona o Modo Offline
       setIsOffline(true);
       
       const servsOffline = await AsyncStorage.getItem('@mochila_servicos');
@@ -85,9 +102,8 @@ export default function MapaScreen() {
     setCarregando(false);
   };
 
-  // Trava de Segurança (Confirmação antes de salvar)
   const confirmarAtualizacao = (id: number, campo: string, valorAntigo: any, valorNovo: any, nomeAmigavel: string) => {
-    if (valorAntigo === valorNovo) return; // Se não mudou nada, não faz nada
+    if (valorAntigo === valorNovo) return; 
     
     if (isOffline) {
       Alert.alert("⚠️ Sem Internet", "Não é possível alterar a estrutura da fazenda no modo offline. Conecte-se para editar.");
@@ -98,20 +114,12 @@ export default function MapaScreen() {
       "⚠️ Atenção",
       `Tem certeza que deseja alterar ${nomeAmigavel} para "${valorNovo}"?`,
       [
-        { 
-          text: "Cancelar", 
-          style: "cancel", 
-          onPress: () => carregarMapa() // Recarrega para voltar o visual ao original
-        },
-        { 
-          text: "Sim, Alterar", 
-          onPress: () => atualizarConfigRamal(id, campo, valorNovo) 
-        }
+        { text: "Cancelar", style: "cancel", onPress: () => carregarMapa() },
+        { text: "Sim, Alterar", onPress: () => atualizarConfigRamal(id, campo, valorNovo) }
       ]
     );
   };
 
-  // Função que realmente envia para o Supabase
   const atualizarConfigRamal = async (id: number, campo: string, valor: any) => {
     setCarregando(true);
     const { error } = await supabase.from('mapa_fazendas').update({ [campo]: valor }).eq('id', id);
@@ -119,13 +127,12 @@ export default function MapaScreen() {
       Alert.alert("Erro", "Falha ao atualizar o dado.");
       carregarMapa();
     } else {
-      carregarMapa(); // Recarrega para mostrar o novo valor
+      carregarMapa(); 
     }
   };
 
   return (
     <View style={{ flex: 1 }}>
-      {/* ALERTA DE MODO OFFLINE */}
       {isOffline && (
         <View style={styles.offlineBadge}>
           <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO - Apenas visualização.</Text>
@@ -173,17 +180,17 @@ export default function MapaScreen() {
                           {quadra.ramais.map((r: any, idx: number) => (
                             <View key={r.id || idx} style={styles.ramalItem}>
                               
-                              {/* COLUNA ESQUERDA: RAMAL E SERVIÇO */}
                               <View style={{ flex: 1.5, paddingRight: 10 }}>
                                 <Text style={styles.ramalTexto}>↳ Ramal {r.ramal}</Text>
                                 
                                 <Text style={styles.miniLabel}>Serviço Vinculado:</Text>
-                                {/* PICKER TRAZENDO OS SERVIÇOS DO BANCO */}
-                                <View style={styles.miniPickerContainer}>
+                                
+                                <View style={[styles.miniPickerContainer, !podeEditar && styles.pickerBloqueado]}>
                                   <Picker
+                                    enabled={podeEditar} // 👉 BLOQUEIO: Só supervisor/admin pode clicar
                                     selectedValue={r.servico}
                                     onValueChange={(itemValue) => {
-                                      if (itemValue !== r.servico) {
+                                      if (itemValue !== r.servico && podeEditar) {
                                         confirmarAtualizacao(r.id, 'servico_permitido', r.servico, itemValue, 'o Serviço');
                                       }
                                     }}
@@ -197,16 +204,18 @@ export default function MapaScreen() {
                                 </View>
                               </View>
 
-                              {/* COLUNA DIREITA: QUANTIDADE DE PÉS */}
                               <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
                                 <Text style={styles.miniLabel}>Qtd Pés (Editar):</Text>
                                 <TextInput 
-                                  style={styles.inputEditQtd} 
+                                  editable={podeEditar} // 👉 BLOQUEIO: Só supervisor/admin digita
+                                  style={[styles.inputEditQtd, !podeEditar && styles.inputBloqueado]} 
                                   defaultValue={r.total.toString()}
                                   keyboardType="numeric"
                                   onEndEditing={(e) => {
-                                    const novoValor = parseInt(e.nativeEvent.text) || 0;
-                                    confirmarAtualizacao(r.id, 'total_pes', r.total, novoValor, 'a Quantidade de Pés');
+                                    if (podeEditar) {
+                                      const novoValor = parseInt(e.nativeEvent.text) || 0;
+                                      confirmarAtualizacao(r.id, 'total_pes', r.total, novoValor, 'a Quantidade de Pés');
+                                    }
                                   }}
                                 />
                               </View>
@@ -254,33 +263,10 @@ const styles = StyleSheet.create({
   
   miniLabel: { fontSize: 11, color: '#7F8C8D', marginTop: 4, fontWeight: 'bold' },
   
-  // ESTILO DO PICKER (CAIXINHA DE SERVIÇOS)
-  miniPickerContainer: { 
-    backgroundColor: '#D4E6F1', 
-    borderRadius: 6, 
-    marginTop: 4, 
-    height: 50, 
-    justifyContent: 'center', 
-    overflow: 'hidden' 
-  },
-  miniPicker: { 
-    height: 50, 
-    color: '#2980B9',
-    width: '100%',
-    fontWeight: 'bold'
-  },
+  miniPickerContainer: { backgroundColor: '#D4E6F1', borderRadius: 6, marginTop: 4, height: 50, justifyContent: 'center', overflow: 'hidden' },
+  pickerBloqueado: { backgroundColor: '#EAECEE', opacity: 0.8 }, 
+  miniPicker: { height: 50, color: '#2980B9', width: '100%', fontWeight: 'bold' },
 
-  // ESTILO DO INPUT DE QUANTIDADE
-  inputEditQtd: { 
-    backgroundColor: '#EAEDED', 
-    color: '#2C3E50', 
-    paddingHorizontal: 10, 
-    paddingVertical: 8, 
-    borderRadius: 6, 
-    marginTop: 4, 
-    fontSize: 14, 
-    fontWeight: 'bold', 
-    textAlign: 'center', 
-    minWidth: 70 
-  }
+  inputEditQtd: { backgroundColor: '#EAEDED', color: '#2C3E50', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, marginTop: 4, fontSize: 14, fontWeight: 'bold', textAlign: 'center', minWidth: 70 },
+  inputBloqueado: { backgroundColor: '#EAECEE', color: '#95A5A6', fontStyle: 'italic' } 
 });

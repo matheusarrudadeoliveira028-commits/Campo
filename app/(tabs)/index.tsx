@@ -136,7 +136,14 @@ export default function HomeScreen() {
     setCarregandoDados(true);
     try {
       const { data: colabs, error: errColab } = await supabase.from('colaboradores').select('*').order('nome');
-      const { data: servs, error: errServ } = await supabase.from('servicos').select('*').order('nome');
+      
+      // 👉 TRAVA DE SEGURANÇA NA NUVEM: Só traz o que NÃO está bloqueado
+      const { data: servs, error: errServ } = await supabase
+        .from('servicos')
+        .select('*')
+        .neq('bloqueado', true)
+        .order('nome');
+
       const { data: mapa, error: errMapa } = await supabase.from('mapa_fazendas').select('*');
       const { data: config, error: errConfig } = await supabase.from('configuracoes').select('*').single();
 
@@ -169,7 +176,13 @@ export default function HomeScreen() {
         setHoraFimPermitida(conf.fim);
       }
       if (mochilaColabs) setListaColaboradores(JSON.parse(mochilaColabs));
-      if (mochilaServs) setListaServicos(JSON.parse(mochilaServs));
+      
+      // 👉 TRAVA DE SEGURANÇA NA MOCHILA: Filtra serviços bloqueados se estiver offline
+      if (mochilaServs) {
+        const servicosMochila = JSON.parse(mochilaServs);
+        setListaServicos(servicosMochila.filter((s: any) => s.bloqueado !== true));
+      }
+      
       if (mochilaMapa) {
         const mapaParsed = JSON.parse(mochilaMapa);
         setMapaCompleto(mapaParsed);
@@ -462,7 +475,6 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* 👉 ADICIONADO keyboardShouldPersistTaps para facilitar o clique no botão Salvar */}
         <ScrollView 
           style={styles.container} 
           contentContainerStyle={{ paddingBottom: 150 }}
@@ -597,7 +609,6 @@ export default function HomeScreen() {
           </View>
         </ScrollView>
 
-        {/* MODAL DA CÂMERA EM TELA CHEIA */}
         <Modal visible={cameraVisivel} transparent={false} animationType="slide">
           <View style={styles.modalCameraContainer}>
             <CameraView style={styles.cameraVisor} facing="front" ref={cameraRef}>
@@ -622,7 +633,6 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
-        {/* MODAL 1: LISTA DA EQUIPE */}
         <Modal visible={modalEquipeVisivel} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -645,7 +655,6 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
-        {/* MODAL 2: EDITAR/EXCLUIR PENDENTES */}
         <Modal visible={modalPendentesVisivel} transparent={true} animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContentGrande}>
