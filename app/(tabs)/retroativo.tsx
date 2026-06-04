@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
-export default function HomeScreen() {
+export default function RetroativoScreen() {
   const [colaborador, setColaborador] = useState('');
   const [servico, setServico] = useState('');
   const [servicoSelecionadoCompleto, setServicoSelecionadoCompleto] = useState<any>(null);
@@ -15,6 +15,9 @@ export default function HomeScreen() {
   const [ramal, setRamal] = useState(''); 
   const [quantidade, setQuantidade] = useState('');
   const [valorTotalCalculado, setValorTotalCalculado] = useState(0);
+  
+  // 👉 Campo de Data Manual
+  const [dataManual, setDataManual] = useState('');
   
   const [listaColaboradores, setListaColaboradores] = useState<any[]>([]);
   const [listaServicos, setListaServicos] = useState<any[]>([]);
@@ -26,28 +29,29 @@ export default function HomeScreen() {
   
   const [salvando, setSalvando] = useState(false);
   const [carregandoDados, setCarregandoDados] = useState(true);
-  const [dataHoraAtual, setDataHoraAtual] = useState(new Date());
 
   const [perfilLogado, setPerfilLogado] = useState<any>(null);
-  const [lancamentosPendentes, setLancamentosPendentes] = useState<any[]>([]);
-  const [sincronizando, setSincronizando] = useState(false);
-  
   const [isOffline, setIsOffline] = useState(false);
 
-  // Controle de Horário Permitido
-  const [horaInicioPermitida, setHoraInicioPermitida] = useState('06:00');
-  const [horaFimPermitida, setHoraFimPermitida] = useState('18:00');
-
-  // ESTADOS DOS MODAIS
   const [modalEquipeVisivel, setModalEquipeVisivel] = useState(false);
-  const [modalPendentesVisivel, setModalPendentesVisivel] = useState(false);
 
   useEffect(() => {
     carregarUsuarioLogado(); 
-    carregarLancamentosLocais(); 
-    const timer = setInterval(() => setDataHoraAtual(new Date()), 1000);
-    return () => clearInterval(timer);
+    
+    // Sugere a data de ontem automaticamente para facilitar
+    const ontem = new Date();
+    ontem.setDate(ontem.getDate() - 1);
+    setDataManual(ontem.toLocaleDateString('pt-BR'));
   }, []);
+
+  // Máscara de Data
+  const aplicarMascaraData = (texto: string) => {
+    let v = texto.replace(/\D/g, ''); 
+    if (v.length > 8) v = v.substring(0, 8); 
+    if (v.length > 4) v = v.replace(/^(\d{2})(\d{2})(\d{1,4}).*/, '$1/$2/$3');
+    else if (v.length > 2) v = v.replace(/^(\d{2})(\d{1,2}).*/, '$1/$2');
+    return v;
+  };
 
   const carregarUsuarioLogado = async () => {
     try {
@@ -60,7 +64,7 @@ export default function HomeScreen() {
         if (perfilData && !perfilError) {
           setPerfilLogado(perfilData);
           await AsyncStorage.setItem('@perfil_offline', JSON.stringify(perfilData));
-          carregarDadosBase(perfilData, session.user.id);
+          carregarDadosBase();
           setIsOffline(false);
         } else {
           acionarMochilaDePerfil(perfilSalvoStr);
@@ -79,42 +83,20 @@ export default function HomeScreen() {
     if (perfilSalvoStr) {
       const p = JSON.parse(perfilSalvoStr);
       setPerfilLogado(p);
-      carregarDadosBase(p, p.id);
+      carregarDadosBase();
     } else {
       router.replace('/');
     }
   };
 
-  const carregarLancamentosLocais = async () => {
-    try {
-      const dados = await AsyncStorage.getItem('@lancamentos_off');
-      if (dados) setLancamentosPendentes(JSON.parse(dados));
-    } catch (e) {
-      console.log("Erro ao carregar dados locais");
-    }
-  };
-
-  const carregarDadosBase = async (perfilLido: any, userIdLido: string | null) => {
+  const carregarDadosBase = async () => {
     setCarregandoDados(true);
     try {
       const { data: colabs, error: errColab } = await supabase.from('colaboradores').select('*').order('nome');
-      
-      const { data: servs, error: errServ } = await supabase
-        .from('servicos')
-        .select('*')
-        .neq('bloqueado', true)
-        .order('nome');
-
+      const { data: servs, error: errServ } = await supabase.from('servicos').select('*').neq('bloqueado', true).order('nome');
       const { data: mapa, error: errMapa } = await supabase.from('mapa_fazendas').select('*');
-      const { data: config, error: errConfig } = await supabase.from('configuracoes').select('*').single();
 
       if (errColab || errServ || errMapa) throw new Error("Sem rede");
-
-      if (config) {
-        setHoraInicioPermitida(config.hora_inicio);
-        setHoraFimPermitida(config.hora_fim);
-        await AsyncStorage.setItem('@config_horarios', JSON.stringify({ inicio: config.hora_inicio, fim: config.hora_fim }));
-      }
 
       if (colabs) { setListaColaboradores(colabs); await AsyncStorage.setItem('@mochila_colaboradores', JSON.stringify(colabs)); }
       if (servs) { setListaServicos(servs); await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs)); }
@@ -129,20 +111,9 @@ export default function HomeScreen() {
       const mochilaColabs = await AsyncStorage.getItem('@mochila_colaboradores');
       const mochilaServs = await AsyncStorage.getItem('@mochila_servicos');
       const mochilaMapa = await AsyncStorage.getItem('@mochila_mapa');
-      const mochilaConfig = await AsyncStorage.getItem('@config_horarios');
 
-      if (mochilaConfig) {
-        const conf = JSON.parse(mochilaConfig);
-        setHoraInicioPermitida(conf.inicio);
-        setHoraFimPermitida(conf.fim);
-      }
       if (mochilaColabs) setListaColaboradores(JSON.parse(mochilaColabs));
-      
-      if (mochilaServs) {
-        const servicosMochila = JSON.parse(mochilaServs);
-        setListaServicos(servicosMochila.filter((s: any) => s.bloqueado !== true));
-      }
-      
+      if (mochilaServs) setListaServicos(JSON.parse(mochilaServs).filter((s: any) => s.bloqueado !== true));
       if (mochilaMapa) {
         const mapaParsed = JSON.parse(mochilaMapa);
         setMapaCompleto(mapaParsed);
@@ -219,7 +190,7 @@ export default function HomeScreen() {
   const handleMudancaQuantidade = (texto: string) => {
     const valorDigitado = parseInt(texto) || 0;
     if (limitePes !== null && valorDigitado > limitePes) {
-      Alert.alert("⚠️ Limite Atingido", `A soma máxima dos ramais selecionados é de ${limitePes} pés/tambores!`);
+      Alert.alert("⚠️ Limite Atingido", `A soma máxima dos ramais selecionados é de ${limitePes} pés!`);
       setQuantidade(limitePes.toString());
     } else {
       setQuantidade(texto);
@@ -227,37 +198,25 @@ export default function HomeScreen() {
   };
 
   const salvarLancamento = async () => {
-    if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade) { 
-      return Alert.alert("Aviso", "Preencha todos os campos!"); 
+    if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade || !dataManual) { 
+      return Alert.alert("Aviso", "Preencha todos os campos e a data!"); 
     }
-    
-    const horaAtual = dataHoraAtual.toLocaleTimeString('pt-BR').substring(0, 5); 
-    if (horaAtual < horaInicioPermitida || horaAtual > horaFimPermitida) {
-      return Alert.alert(
-        "🚫 Fora do Expediente", 
-        `Lançamentos permitidos apenas entre ${horaInicioPermitida} e ${horaFimPermitida}.`
-      );
+
+    if (dataManual.length !== 10) {
+      return Alert.alert("Aviso", "A data deve estar no formato DD/MM/AAAA");
     }
 
     const listaDeRamaisSelecionados = processarRamaisMuitos(ramal);
     if (listaDeRamaisSelecionados.length === 0) {
-      return Alert.alert("Erro", "Formato de ramal inválido. Digite um número ou intervalo válido.");
+      return Alert.alert("Erro", "Formato de ramal inválido.");
     }
 
     const isServicoAtualCoringa = servicoSelecionadoCompleto?.is_coringa === true;
 
     for (const numRamal of listaDeRamaisSelecionados) {
       const ramalInfo = ramaisDisponiveis.find(r => r.ramal === numRamal);
-      
       if (ramalInfo?.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
         return Alert.alert("❌ Bloqueado", `O ramal ${numRamal} só aceita: ${ramalInfo.servico_permitido}.`); 
-      }
-
-      if (ramalInfo?.data_bloqueio) {
-        const hojeISO = dataHoraAtual.toISOString().split('T')[0];
-        if (hojeISO !== ramalInfo.data_bloqueio) { 
-          return Alert.alert("📅 Data Bloqueada", `Lançamentos para o ramal ${numRamal} permitidos apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
-        }
       }
     }
 
@@ -267,6 +226,9 @@ export default function HomeScreen() {
 
     const quantidadePorRamal = Math.floor(parseInt(quantidade) / listaDeRamaisSelecionados.length);
     const valorPorRamal = valorTotalCalculado / listaDeRamaisSelecionados.length;
+
+    const partesData = dataManual.split('/');
+    const dataIsoParaSalvar = `${partesData[2]}-${partesData[1]}-${partesData[0]}T12:00:00.000Z`;
 
     try {
       const novosLancamentosMultiplos = listaDeRamaisSelecionados.map(numRamal => ({
@@ -278,101 +240,41 @@ export default function HomeScreen() {
         quantidade: quantidadePorRamal, 
         valor_unitario: valorUnitario, 
         valor_total: valorPorRamal, 
-        data: dataHoraAtual.toISOString(),
-        fiscal_nome: perfilLogado?.nome || 'Fiscal Não Identificado' 
+        data: dataIsoParaSalvar, 
+        fiscal_nome: perfilLogado?.nome || 'Lançamento Retroativo' 
       }));
 
-      const novaLista = [...lancamentosPendentes, ...novosLancamentosMultiplos];
-      await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
-      setLancamentosPendentes(novaLista);
+      // 👉 SALVA 100% ONLINE DIRETO NO SUPABASE
+      const { error } = await supabase.from('diarios_campo').insert(novosLancamentosMultiplos);
+      
+      if (error) throw error;
 
       Alert.alert(
-        "✅ Salvo Offline", 
-        `Foram registrados ${listaDeRamaisSelecionados.length} ramais.\nValor total garantido: R$ ${valorTotalCalculado.toFixed(2).replace('.', ',')}`
+        "✅ Sucesso!", 
+        `Lançamento retroativo enviado para a nuvem na data ${dataManual}.\nValor total: R$ ${valorTotalCalculado.toFixed(2).replace('.', ',')}`
       );
 
       setRamal(''); setQuantidade(''); setValorTotalCalculado(0);
-    } catch (e) {
-      Alert.alert("Erro", "Não foi possível salvar.");
+    } catch (e: any) {
+      Alert.alert(
+        "Erro de Conexão", 
+        "Você precisa de internet para salvar um retroativo. Verifique sua conexão e tente novamente."
+      );
     } finally {
       setSalvando(false);
     }
   };
 
-  const sincronizarComBanco = async () => {
-    if (lancamentosPendentes.length === 0) return;
-    setSincronizando(true);
-
-    try {
-      const lancamentosProntosParaNuvem = [];
-
-      for (const item of lancamentosPendentes) {
-        // Limpa referências a fotos antigas caso o usuário tenha salvo na mochila antes da atualização
-        const { foto_local, foto_url, ...dados } = item;
-        lancamentosProntosParaNuvem.push(dados);
-      }
-
-      const { error: dbError } = await supabase.from('diarios_campo').insert(lancamentosProntosParaNuvem);
-      if (dbError) throw dbError;
-      
-      await AsyncStorage.removeItem('@lancamentos_off');
-      setLancamentosPendentes([]);
-      carregarDadosBase(perfilLogado, perfilLogado?.id || null);
-      Alert.alert("🚀 Sincronizado com Sucesso!", "Todas as produções foram enviadas para o servidor.");
-      
-    } catch (e: any) {
-      Alert.alert("Erro na Sincronização", "O envio foi interrompido: " + e.message);
-    } finally {
-      setSincronizando(false);
-    }
-  };
-
-  const excluirLancamentoPendente = async (index: number) => {
-    Alert.alert("Excluir Lançamento", "Tem certeza que deseja apagar este registro?", [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Sim, Apagar", onPress: async () => {
-          const novaLista = [...lancamentosPendentes];
-          novaLista.splice(index, 1);
-          await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
-          setLancamentosPendentes(novaLista);
-        }
-      }
-    ]);
-  };
-
-  const editarLancamentoPendente = async (index: number) => {
-    const item = lancamentosPendentes[index];
-    const novaLista = [...lancamentosPendentes];
-    novaLista.splice(index, 1);
-    await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
-    setLancamentosPendentes(novaLista);
-
-    setColaborador(item.colaborador);
-    setServico(item.servico);
-    setFazenda(item.fazenda);
-    setQuadra(item.quadra);
-    
-    setModalPendentesVisivel(false);
-    Alert.alert("Modo Edição", "Altere o que precisar e salve novamente.");
-  };
-
   return (
-    <KeyboardAvoidingView 
-      style={{ flex: 1 }} 
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{flex: 1}}>
         {isOffline && (
           <View style={styles.offlineBadge}>
-            <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO - Lançamentos salvos no celular.</Text>
+            <Text style={styles.offlineText}>⚠️ ATENÇÃO: Você está sem internet. Retroativos exigem conexão.</Text>
           </View>
         )}
 
-        <ScrollView 
-          style={styles.container} 
-          contentContainerStyle={{ paddingBottom: 150 }}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 150 }} keyboardShouldPersistTaps="handled">
           
           <View style={styles.topBar}>
             {perfilLogado ? (
@@ -386,39 +288,31 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.header}>
-            <Text style={styles.title}>Brekaz Produção </Text>
-            <Text style={styles.subtitle}>Lançamento Livre para Todas as Equipes</Text>
+            <Text style={styles.titleRetro}>Lançamento Retroativo ⏳</Text>
+            <Text style={styles.subtitle}>Registro 100% Online de dias anteriores</Text>
             <View style={styles.relogioBox}>
-                <Text style={styles.relogioTexto}>{dataHoraAtual.toLocaleDateString('pt-BR')} - {dataHoraAtual.toLocaleTimeString('pt-BR')}</Text>
-                <TouchableOpacity onPress={atualizarMochilaManual} style={styles.btnAtualizar}>
-                   <Text style={styles.btnAtualizarText}>🔄 Atualizar Base de Dados</Text>
-                </TouchableOpacity>
+                <Text style={{color: '#FFF', fontWeight: 'bold', marginBottom: 5}}>Data do Serviço:</Text>
+                <TextInput 
+                  style={styles.inputDataManual} 
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor="#95A5A6"
+                  keyboardType="numeric"
+                  maxLength={10}
+                  value={dataManual}
+                  onChangeText={(t) => setDataManual(aplicarMascaraData(t))}
+                />
             </View>
           </View>
 
-          {lancamentosPendentes.length > 0 && (
-            <View style={styles.syncCard}>
-              <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} lançamentos pendentes</Text>
-              <View style={styles.syncBotoesRow}>
-                <TouchableOpacity style={styles.btnSyncVer} onPress={() => setModalPendentesVisivel(true)}>
-                  <Text style={styles.btnSyncVerTexto}>✏️ VER / EDITAR</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.btnSync} onPress={sincronizarComBanco} disabled={sincronizando}>
-                  {sincronizando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSyncTexto}>🚀 ENVIAR TUDO</Text>}
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
           <View style={styles.card}>
             {carregandoDados ? (
-              <ActivityIndicator size="large" color="#27AE60" />
+              <ActivityIndicator size="large" color="#E67E22" />
             ) : (
               <>
                 <Text style={styles.label}>Colaborador:</Text>
                 <View style={styles.pickerContainer}>
                   <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
-                    <Picker.Item label="Quem está trabalhando?" value="" />
+                    <Picker.Item label="Quem trabalhou neste dia?" value="" />
                     {listaColaboradores.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
                   </Picker>
                 </View>
@@ -426,7 +320,7 @@ export default function HomeScreen() {
                 <Text style={styles.label}>Serviço:</Text>
                 <View style={styles.pickerContainer}>
                   <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
-                    <Picker.Item label="Qual o serviço?" value="" />
+                    <Picker.Item label="Qual foi o serviço?" value="" />
                     {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
                   </Picker>
                 </View>
@@ -466,8 +360,8 @@ export default function HomeScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
-                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR PARA ENVIO</Text>}
+                <TouchableOpacity style={[styles.buttonRetro, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando || isOffline}>
+                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 ENVIAR PARA NUVEM</Text>}
                 </TouchableOpacity>
               </>
             )}
@@ -496,39 +390,6 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
-        <Modal visible={modalPendentesVisivel} transparent={true} animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContentGrande}>
-              <Text style={styles.modalTitle}>Lançamentos Pendentes</Text>
-              <ScrollView style={{maxHeight: 500}}>
-                {lancamentosPendentes.length === 0 ? (
-                  <Text style={styles.textoVazio}>Nenhum lançamento offline.</Text>
-                ) : (
-                  lancamentosPendentes.map((item, index) => (
-                    <View key={index} style={styles.itemPendente}>
-                      <View style={styles.itemInfo}>
-                        <Text style={styles.itemColab}>{item.colaborador}</Text>
-                        <Text style={styles.itemDetalhes}>{item.servico} | Ramal: {item.ramal}</Text>
-                        <Text style={styles.itemDetalhes}>Qtd: {item.quantidade} | R$ {item.valor_total.toFixed(2)}</Text>
-                      </View>
-                      <View style={styles.itemAcoes}>
-                        <TouchableOpacity style={styles.btnEditarPendente} onPress={() => editarLancamentoPendente(index)}>
-                          <Text style={styles.btnAcaoTexto}>✏️</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.btnApagarPendente} onPress={() => excluirLancamentoPendente(index)}>
-                          <Text style={styles.btnAcaoTexto}>🗑️</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </ScrollView>
-              <TouchableOpacity style={styles.btnFecharModal} onPress={() => setModalPendentesVisivel(false)}>
-                <Text style={styles.btnFecharTexto}>VOLTAR</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -536,26 +397,17 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#F5F7FA', padding: 20 },
-  offlineBadge: { backgroundColor: '#E74C3C', padding: 8, alignItems: 'center', justifyContent: 'center' },
-  offlineText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  offlineBadge: { backgroundColor: '#C0392B', padding: 10, alignItems: 'center', justifyContent: 'center' },
+  offlineText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, textAlign: 'center' },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5, backgroundColor: '#FFF', padding: 12, borderRadius: 8, elevation: 2 },
   userText: { fontSize: 13, fontWeight: 'bold', color: '#2C3E50', flex: 1 },
   btnEquipe: { backgroundColor: '#3498DB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 5, marginRight: 8 },
   btnEquipeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   header: { marginBottom: 20, marginTop: 10, alignItems: 'center' },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#2C3E50' },
-  subtitle: { fontSize: 16, color: '#7F8C8D', textAlign: 'center' },
-  relogioBox: { backgroundColor: '#34495E', padding: 10, borderRadius: 8, marginTop: 15, alignItems: 'center', width: '100%' },
-  relogioTexto: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  btnAtualizar: { backgroundColor: '#27AE60', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginTop: 10 },
-  btnAtualizarText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  syncCard: { backgroundColor: '#F39C12', padding: 15, borderRadius: 12, marginBottom: 20, alignItems: 'center' },
-  syncTexto: { color: '#FFF', fontWeight: 'bold', marginBottom: 10 },
-  syncBotoesRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
-  btnSyncVer: { backgroundColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8, flex: 1, marginRight: 10, alignItems: 'center' },
-  btnSyncVerTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
-  btnSync: { backgroundColor: '#FFF', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8, flex: 1, alignItems: 'center' },
-  btnSyncTexto: { color: '#F39C12', fontWeight: 'bold', fontSize: 12 },
+  titleRetro: { fontSize: 26, fontWeight: 'bold', color: '#D35400' }, 
+  subtitle: { fontSize: 15, color: '#7F8C8D', textAlign: 'center' },
+  relogioBox: { backgroundColor: '#D35400', padding: 15, borderRadius: 8, marginTop: 15, alignItems: 'center', width: '100%' }, 
+  inputDataManual: { backgroundColor: '#FFF', width: '60%', padding: 10, borderRadius: 8, textAlign: 'center', fontSize: 18, fontWeight: 'bold', color: '#2C3E50' },
   card: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 15, elevation: 5 },
   label: { fontSize: 14, fontWeight: '700', color: '#34495E', marginBottom: 5, marginTop: 15 },
   pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden' },
@@ -568,24 +420,17 @@ const styles = StyleSheet.create({
   cardGanho: { backgroundColor: '#E8F8F5', padding: 15, borderRadius: 10, marginTop: 20, alignItems: 'center', borderLeftWidth: 5, borderLeftColor: '#27AE60' },
   textoGanho: { color: '#1E8449', fontSize: 13, fontWeight: 'bold' },
   valorGanho: { color: '#1E8449', fontSize: 24, fontWeight: '900' },
-  button: { backgroundColor: '#2980B9', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 15 },
+  buttonRetro: { backgroundColor: '#D35400', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 15 }, 
   buttonDisabled: { backgroundColor: '#95A5A6' },
   buttonText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFF', width: '100%', borderRadius: 15, padding: 20, elevation: 10 },
-  modalContentGrande: { backgroundColor: '#FFF', width: '100%', borderRadius: 15, padding: 20, elevation: 10, flex: 0.9 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#2C3E50', marginBottom: 15, textAlign: 'center' },
   textoVazio: { textAlign: 'center', color: '#7F8C8D', marginVertical: 20 },
   itemEquipe: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#ECF0F1' },
   nomeEquipe: { fontSize: 16, color: '#34495E', fontWeight: 'bold' },
-  itemPendente: { flexDirection: 'row', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#D5DBDB', borderRadius: 8, padding: 12, marginBottom: 10, alignItems: 'center' },
-  itemInfo: { flex: 1 },
-  itemColab: { fontSize: 16, fontWeight: 'bold', color: '#2C3E50' },
-  itemDetalhes: { fontSize: 13, color: '#7F8C8D', marginTop: 2 },
-  itemAcoes: { flexDirection: 'row', gap: 10 },
-  btnEditarPendente: { backgroundColor: '#F1C40F', padding: 10, borderRadius: 8 },
-  btnApagarPendente: { backgroundColor: '#E74C3C', padding: 10, borderRadius: 8 },
-  btnAcaoTexto: { fontSize: 16 },
   btnFecharModal: { backgroundColor: '#95A5A6', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 15 },
-  btnFecharTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 14 }
+  btnFecharTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+  btnAtualizar: { backgroundColor: '#E67E22', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginTop: 10 },
+  btnAtualizarText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }
 });

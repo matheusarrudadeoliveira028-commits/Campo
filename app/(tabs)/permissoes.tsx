@@ -4,7 +4,6 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, Touchab
 import { supabase } from '../../src/supabase';
 
 export default function PermissoesScreen() {
-  // Começa selecionando o cargo padrão do seu sistema
   const [cargoSelecionado, setCargoSelecionado] = useState('Fiscal de Campo');
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -13,17 +12,19 @@ export default function PermissoesScreen() {
 
   const nomesTelas = [
     { chave: 'mapa', nome: '🗺️ Mapa Da Fazenda' },
-    { chave: 'auditoria', nome: '📸 Auditoria De Fotos' },
     { chave: 'fechamento', nome: '💰 Fechamento Financeiro' },
     { chave: 'usuarios', nome: '👥 Gestão De Acessos' },
     { chave: 'estatisticas', nome: '📊 Estatísticas De Produção' },
     { chave: 'ferias', nome: '🏖️ Férias' },
     { chave: 'equipes', nome: '👷 Equipes' },
-    { chave: 'explore', nome: '🔍 Explore' },
+    { chave: 'suporte', nome: '🎧 Suporte Brekaz' },
     { chave: 'ausencias', nome: '❌ Ausências' },
     { chave: 'cadastros', nome: '📝 Cadastros' },
     { chave: 'relatorios', nome: '📄 Relatórios' },
-    { chave: 'colaboradores', nome: '🤝 Colaboradores' }
+    { chave: 'colaboradores', nome: '🤝 Colaboradores' },
+    { chave: 'diarios', nome: '📖 Diário Reserva' },
+    { chave: 'retroativo', nome: '⏳ Lançamento Retroativo' },
+    { chave: 'carregamentos', nome: '🚛 Expedição / Romaneio' }
   ];
 
   useEffect(() => {

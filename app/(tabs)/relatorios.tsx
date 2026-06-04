@@ -7,7 +7,6 @@ import { supabase } from '../../src/supabase';
 
 export default function RelatoriosScreen() {
   const [colaboradorSelecionado, setColaboradorSelecionado] = useState('');
-  const [encarregado, setEncarregado] = useState('Mario Rodrigues Valentin');
   
   // DATAS E FERIADOS
   const [dataInicio, setDataInicio] = useState('');
@@ -50,6 +49,12 @@ export default function RelatoriosScreen() {
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const d = String(date.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
+  };
+
+  // 👉 TRITURADOR DE NOMES (Remove espaços extras e compara com precisão)
+  const limparNome = (nome: string) => {
+    if (!nome) return '';
+    return nome.trim().toLowerCase().replace(/\s+/g, ' ');
   };
 
   const gerarPDF = async () => {
@@ -117,9 +122,33 @@ export default function RelatoriosScreen() {
         
         const totalGeral = folha.registros.reduce((soma: number, item: any) => soma + (item.valor_total || 0), 0);
         const totalQuantidade = folha.registros.reduce((soma: number, item: any) => soma + (Number(item.quantidade) || 0), 0);
+        
+        const encarregadoNome = folha.registros.length > 0 && folha.registros[0].fiscal_nome 
+            ? folha.registros[0].fiscal_nome 
+            : 'Não Identificado';
+
+        // 👉 BUSCANDO A DATA DE ADMISSÃO (CORRIGIDA)
+        const nomeLimpoFolha = limparNome(folha.nome);
+        const dadosDoColaborador = listaColaboradores.find(c => limparNome(c.nome) === nomeLimpoFolha);
+        
+        let dataAdmissaoIso = null;
+        let dataAdmissaoCabecalho = 'NÃO ENCONTRADA';
+
+        if (dadosDoColaborador) {
+          const adm = dadosDoColaborador.data_admissao || dadosDoColaborador.created_at;
+          if (adm) {
+            const admStr = String(adm).trim();
+            // Lógica para converter AAAA-DD-MM (formato do banco) para AAAA-MM-DD
+            if (admStr.includes('-')) {
+              const p = admStr.split('T')[0].split('-');
+              // Supabase salva AAAA-MM-DD, mas vamos garantir o formato padrão
+              dataAdmissaoIso = `${p[0]}-${p[1]}-${p[2]}`;
+              dataAdmissaoCabecalho = `${p[2]}/${p[1]}/${p[0]}`;
+            }
+          }
+        }
 
         let linhasTabela = '';
-        
         let dataAtualLoop = new Date(`${dtInicioBD}T12:00:00`);
         const dataFimLoop = new Date(`${dtFimBD}T12:00:00`);
 
@@ -148,7 +177,6 @@ export default function RelatoriosScreen() {
               `;
             });
           } else {
-            // 👉 LÓGICA DE FALTAS, FÉRIAS E FERIADOS
             const isFeriado = arrayFeriados.includes(diaMesStr);
             const isFerias = feriasDB?.some((f: any) => 
               f.colaborador_nome === folha.nome && 
@@ -156,7 +184,11 @@ export default function RelatoriosScreen() {
               isoDate <= f.data_fim
             );
             
-            if (isFerias) {
+            const isAntesAdmissao = dataAdmissaoIso ? (isoDate < dataAdmissaoIso) : false;
+            
+            if (isAntesAdmissao) {
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F8F9F9; color: #95A5A6; font-weight: bold; letter-spacing: 1px;">NÃO ADMITIDO</td></tr>`;
+            } else if (isFerias) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FEF9E7; color: #F39C12; font-weight: bold; letter-spacing: 2px;">FÉRIAS</td></tr>`;
             } else if (isFeriado) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FADBD8; color: #C0392B; font-weight: bold; letter-spacing: 2px;">FERIADO</td></tr>`;
@@ -165,7 +197,6 @@ export default function RelatoriosScreen() {
             } else if (diaDaSemana === 6) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EBF5FB; color: #2980B9; font-weight: bold; letter-spacing: 2px;">SÁBADO</td></tr>`;
             } else {
-              // 👉 SE NÃO BATEU EM NENHUMA REGRA ACIMA, É FALTA!
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FDEDEC; color: #E74C3C; font-weight: bold; letter-spacing: 2px;">FALTA</td></tr>`;
             }
           }
@@ -177,9 +208,10 @@ export default function RelatoriosScreen() {
             <div class="header-container">
               <div class="header-left">
                 <p>Período: <strong>${dataInicio} até ${dataFim}</strong></p>
-                <p>Encarregado: <strong>${encarregado}</strong></p>
+                <p>Encarregado: <strong style="text-transform: uppercase;">${encarregadoNome}</strong></p>
                 <p>Produção: <strong style="${folha.tipo === 'Diaria' ? 'color: #E74C3C; text-transform: uppercase;' : ''}">${folha.tipo}</strong></p>
                 <p>Colaborador: <strong style="font-size: 16px; text-transform: uppercase;">${folha.nome}</strong></p>
+                <p style="color: #7F8C8D; font-size: 12px; margin-top: 5px;">Admissão Registrada: <strong>${dataAdmissaoCabecalho}</strong></p>
               </div>
               <div class="header-right">
                 <p><strong>Luiz Felipe Areovaldo Calhim Manoel Abud</strong></p>
@@ -272,9 +304,6 @@ export default function RelatoriosScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>Nome do Encarregado:</Text>
-        <TextInput style={styles.input} value={encarregado} onChangeText={setEncarregado} />
-
         <View style={styles.row}>
           <View style={styles.col}>
             <Text style={styles.label}>Data Inicial:</Text>

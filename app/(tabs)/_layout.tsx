@@ -103,6 +103,26 @@ export default function DrawerLayout() {
         />
 
         <Drawer.Screen
+          name="diarios"
+          options={{
+            drawerLabel: 'Diário Reserva',
+            title: 'Diário',
+            drawerIcon: ({ color, size }) => <MaterialCommunityIcons name="book-open-page-variant" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('cadastros')
+          }}
+        />
+
+        <Drawer.Screen
+          name="retroativo"
+          options={{
+            drawerLabel: 'Lançamento Retroativo',
+            title: 'Exceções',
+            drawerIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('cadastros')
+          }}
+        />
+
+        <Drawer.Screen
           name="mapa"
           options={{
             drawerLabel: 'Mapa Da Fazenda',
@@ -173,12 +193,12 @@ export default function DrawerLayout() {
         />
 
         <Drawer.Screen
-          name="explore"
+          name="suporte"
           options={{
-            drawerLabel: 'Explore',
-            title: 'Explore',
+            drawerLabel: 'suporte',
+            title: 'suporte',
             drawerIcon: ({ color, size }) => <Ionicons name="compass" size={size} color={color} />,
-            drawerItemStyle: ocultarVisul('explore')
+            drawerItemStyle: ocultarVisul('suporte')
           }}
         />
 
@@ -199,6 +219,16 @@ export default function DrawerLayout() {
             title: 'Cadastros',
             drawerIcon: ({ color, size }) => <Ionicons name="document-text" size={size} color={color} />,
             drawerItemStyle: ocultarVisul('cadastros')
+          }}
+        />
+
+        <Drawer.Screen
+          name="carregamentos"
+          options={{
+            drawerLabel: 'Expedição / Romaneio',
+            title: 'Carregamentos',
+            drawerIcon: ({ color, size }) => <MaterialCommunityIcons name="truck" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('relatorios')
           }}
         />
 

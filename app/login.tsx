@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../src/supabase';
 
@@ -13,6 +13,23 @@ export default function LoginScreen() {
   const [nome, setNome] = useState(''); 
   const [carregando, setCarregando] = useState(false);
   const [modoLogin, setModoLogin] = useState(true); 
+
+  // 👉 PASSE LIVRE OFFLINE: Verifica a mochila do celular na hora que a tela abre!
+  useEffect(() => {
+    verificarAcessoOffline();
+  }, []);
+
+  const verificarAcessoOffline = async () => {
+    try {
+      const perfilSalvo = await AsyncStorage.getItem('@perfil_offline');
+      if (perfilSalvo) {
+        // Encontrou o cara na memória do celular! Não pede internet, não pede senha, joga ele pra dentro!
+        router.replace('/(tabs)');
+      }
+    } catch (e) {
+      console.log("Erro ao checar mochila no login", e);
+    }
+  };
 
   const fazerLogin = async () => {
     if (!email || !senha) return Alert.alert('Aviso', 'Preencha e-mail e senha!');
@@ -99,7 +116,7 @@ export default function LoginScreen() {
           <Image 
             source={LogoImg} 
             style={styles.logoImage} 
-            resizeMode="contain" // Garante que o logo não fique distorcido
+            resizeMode="contain" 
           />
           <Text style={styles.subText}>Sistema de Gestão Resinagem!</Text>
         </View>
@@ -171,10 +188,9 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: '#ffffff', justifyContent: 'center', padding: 20, paddingBottom: 40 },
   logoBox: { alignItems: 'center', marginBottom: 35 },
-  // 👉 ESTILOS DO LOGO
   logoImage: { 
-    width: 400,  // Ajuste a largura conforme necessário
-    height: 300, // Ajuste a altura conforme necessário
+    width: 400,  
+    height: 300, 
     marginBottom: 10 
   },
   subText: { fontSize: 25, color: '#000000', marginTop: 5, fontWeight: '500' },
