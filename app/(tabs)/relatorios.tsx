@@ -51,10 +51,35 @@ export default function RelatoriosScreen() {
     return `${y}-${m}-${d}`;
   };
 
-  // 👉 TRITURADOR DE NOMES (Remove espaços extras e compara com precisão)
+  // 👉 TRITURADOR DE NOMES
   const limparNome = (nome: string) => {
     if (!nome) return '';
-    return nome.trim().toLowerCase().replace(/\s+/g, ' ');
+    return nome.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+  };
+
+  // 👉 EXTRATOR UNIVERSAL DE DATAS (Resolve o bug do formato Americano x Brasileiro)
+  const extrairAdmissaoISO = (admStr: any) => {
+    if (!admStr) return null;
+    let limpa = String(admStr).split('T')[0].split(' ')[0].trim();
+    let a = 0, m = 0, d = 0;
+    if (limpa.includes('/')) {
+      const p = limpa.split('/');
+      if (p.length === 3) {
+          if (p[2].length >= 4) { a = parseInt(p[2], 10); m = parseInt(p[1], 10); d = parseInt(p[0], 10); }
+          else { a = parseInt(p[0], 10); m = parseInt(p[1], 10); d = parseInt(p[2], 10); }
+      }
+    } else if (limpa.includes('-')) {
+       const p = limpa.split('-');
+       if (p.length === 3) {
+           if (p[0].length >= 4) { a = parseInt(p[0], 10); m = parseInt(p[1], 10); d = parseInt(p[2], 10); }
+           else { a = parseInt(p[2], 10); m = parseInt(p[1], 10); d = parseInt(p[0], 10); }
+       }
+    }
+    if (a > 0 && m > 0 && d > 0 && !isNaN(a) && !isNaN(m) && !isNaN(d)) {
+       if (a < 100) a += 2000;
+       return `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+    return null;
   };
 
   const gerarPDF = async () => {
@@ -127,30 +152,28 @@ export default function RelatoriosScreen() {
             ? folha.registros[0].fiscal_nome 
             : 'Não Identificado';
 
-        // 👉 BUSCANDO A DATA DE ADMISSÃO (CORRIGIDA)
         const nomeLimpoFolha = limparNome(folha.nome);
         const dadosDoColaborador = listaColaboradores.find(c => limparNome(c.nome) === nomeLimpoFolha);
         
-        let dataAdmissaoIso = null;
+        let dataAdmissaoIsoStr: string | null = null;
         let dataAdmissaoCabecalho = 'NÃO ENCONTRADA';
 
         if (dadosDoColaborador) {
           const adm = dadosDoColaborador.data_admissao || dadosDoColaborador.created_at;
-          if (adm) {
-            const admStr = String(adm).trim();
-            // Lógica para converter AAAA-DD-MM (formato do banco) para AAAA-MM-DD
-            if (admStr.includes('-')) {
-              const p = admStr.split('T')[0].split('-');
-              // Supabase salva AAAA-MM-DD, mas vamos garantir o formato padrão
-              dataAdmissaoIso = `${p[0]}-${p[1]}-${p[2]}`;
-              dataAdmissaoCabecalho = `${p[2]}/${p[1]}/${p[0]}`;
-            }
+          dataAdmissaoIsoStr = extrairAdmissaoISO(adm);
+          if (dataAdmissaoIsoStr) {
+            const p = dataAdmissaoIsoStr.split('-');
+            dataAdmissaoCabecalho = `${p[2]}/${p[1]}/${p[0]}`;
           }
         }
 
         let linhasTabela = '';
-        let dataAtualLoop = new Date(`${dtInicioBD}T12:00:00`);
-        const dataFimLoop = new Date(`${dtFimBD}T12:00:00`);
+        
+        const pIni = dtInicioBD.split('-');
+        let dataAtualLoop = new Date(parseInt(pIni[0], 10), parseInt(pIni[1], 10) - 1, parseInt(pIni[2], 10), 12, 0, 0);
+
+        const pFim = dtFimBD.split('-');
+        const dataFimLoop = new Date(parseInt(pFim[0], 10), parseInt(pFim[1], 10) - 1, parseInt(pFim[2], 10), 12, 0, 0);
 
         while (dataAtualLoop <= dataFimLoop) {
           const isoDate = formatarDataIso(dataAtualLoop);
@@ -184,10 +207,12 @@ export default function RelatoriosScreen() {
               isoDate <= f.data_fim
             );
             
-            const isAntesAdmissao = dataAdmissaoIso ? (isoDate < dataAdmissaoIso) : false;
+            // 👉 Comparação blindada (Ex: "2026-06-01" < "2026-06-04")
+            const isAntesAdmissao = dataAdmissaoIsoStr !== null && (isoDate < dataAdmissaoIsoStr);
             
             if (isAntesAdmissao) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F8F9F9; color: #95A5A6; font-weight: bold; letter-spacing: 1px;">NÃO ADMITIDO</td></tr>`;
+              // Deixa a linha completamente em branco, conforme solicitado!
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F4F6F6;"></td></tr>`;
             } else if (isFerias) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FEF9E7; color: #F39C12; font-weight: bold; letter-spacing: 2px;">FÉRIAS</td></tr>`;
             } else if (isFeriado) {

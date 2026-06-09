@@ -1,10 +1,35 @@
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
+// =========================================================================
+// COMPONENTE ISOLADO DE RELÓGIO (Evita engasgos na tela principal)
+// =========================================================================
+const Relogio = memo(({ onAtualizar }: { onAtualizar: () => void }) => {
+  const [horaAtual, setHoraAtual] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setHoraAtual(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View style={styles.relogioBox}>
+      <Text style={styles.relogioTexto}>{horaAtual.toLocaleDateString('pt-BR')} - {horaAtual.toLocaleTimeString('pt-BR')}</Text>
+      <TouchableOpacity onPress={onAtualizar} style={styles.btnAtualizar}>
+        <Text style={styles.btnAtualizarText}>🔄 Atualizar Base de Dados</Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+// =========================================================================
+// TELA PRINCIPAL
+// =========================================================================
 export default function HomeScreen() {
   const [colaborador, setColaborador] = useState('');
   const [servico, setServico] = useState('');
@@ -26,7 +51,6 @@ export default function HomeScreen() {
   
   const [salvando, setSalvando] = useState(false);
   const [carregandoDados, setCarregandoDados] = useState(true);
-  const [dataHoraAtual, setDataHoraAtual] = useState(new Date());
 
   const [perfilLogado, setPerfilLogado] = useState<any>(null);
   const [lancamentosPendentes, setLancamentosPendentes] = useState<any[]>([]);
@@ -45,8 +69,6 @@ export default function HomeScreen() {
   useEffect(() => {
     carregarUsuarioLogado(); 
     carregarLancamentosLocais(); 
-    const timer = setInterval(() => setDataHoraAtual(new Date()), 1000);
-    return () => clearInterval(timer);
   }, []);
 
   const carregarUsuarioLogado = async () => {
@@ -98,13 +120,7 @@ export default function HomeScreen() {
     setCarregandoDados(true);
     try {
       const { data: colabs, error: errColab } = await supabase.from('colaboradores').select('*').order('nome');
-      
-      const { data: servs, error: errServ } = await supabase
-        .from('servicos')
-        .select('*')
-        .neq('bloqueado', true)
-        .order('nome');
-
+      const { data: servs, error: errServ } = await supabase.from('servicos').select('*').neq('bloqueado', true).order('nome');
       const { data: mapa, error: errMapa } = await supabase.from('mapa_fazendas').select('*');
       const { data: config, error: errConfig } = await supabase.from('configuracoes').select('*').single();
 
@@ -137,12 +153,10 @@ export default function HomeScreen() {
         setHoraFimPermitida(conf.fim);
       }
       if (mochilaColabs) setListaColaboradores(JSON.parse(mochilaColabs));
-      
       if (mochilaServs) {
         const servicosMochila = JSON.parse(mochilaServs);
         setListaServicos(servicosMochila.filter((s: any) => s.bloqueado !== true));
       }
-      
       if (mochilaMapa) {
         const mapaParsed = JSON.parse(mochilaMapa);
         setMapaCompleto(mapaParsed);
@@ -152,7 +166,7 @@ export default function HomeScreen() {
     setCarregandoDados(false);
   };
 
-  const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados na nuvem..."); };
+  const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados..."); };
 
   useEffect(() => {
     setQuadra(''); setRamal(''); setLimitePes(null);
@@ -166,42 +180,16 @@ export default function HomeScreen() {
     else setRamaisDisponiveis([]);
   }, [quadra]);
 
-  const processarRamaisMuitos = (input: string) => {
-    const listaFinal: string[] = [];
-    const partes = input.split(',');
-
-    partes.forEach(parte => {
-      const trecho = parte.trim();
-      if (trecho.includes('-')) {
-        const [inicio, fim] = trecho.split('-').map(Number);
-        if (!isNaN(inicio) && !isNaN(fim)) {
-          for (let i = inicio; i <= fim; i++) {
-            listaFinal.push(i.toString());
-          }
-        }
-      } else if (trecho !== '') {
-        listaFinal.push(trecho);
-      }
-    });
-
-    return Array.from(new Set(listaFinal));
-  };
-
+  // Efeito para verificar o limite do Ramal individual
   useEffect(() => {
-    const listaRamais = processarRamaisMuitos(ramal);
-    if (listaRamais.length > 0) {
-      let somaLimites = 0;
-      let encontrouAlgumComLimite = false;
-
-      listaRamais.forEach(numRamal => {
-        const ramalSelecionado = ramaisDisponiveis.find(r => r.ramal === numRamal);
-        if (ramalSelecionado && ramalSelecionado.total_pes) {
-          somaLimites += ramalSelecionado.total_pes;
-          encontrouAlgumComLimite = true;
-        }
-      });
-
-      setLimitePes(encontrouAlgumComLimite ? somaLimites : null);
+    const numRamal = ramal.trim();
+    if (numRamal) {
+      const ramalSelecionado = ramaisDisponiveis.find(r => String(r.ramal) === numRamal);
+      if (ramalSelecionado && ramalSelecionado.total_pes) {
+        setLimitePes(ramalSelecionado.total_pes);
+      } else {
+        setLimitePes(null);
+      }
     } else {
       setLimitePes(null);
     }
@@ -216,11 +204,12 @@ export default function HomeScreen() {
     } else setValorTotalCalculado(0);
   }, [servicoSelecionadoCompleto, quantidade]);
 
+  // Lógica de Alerta Cego (sem revelar a quantidade)
   const handleMudancaQuantidade = (texto: string) => {
     const valorDigitado = parseInt(texto) || 0;
     if (limitePes !== null && valorDigitado > limitePes) {
-      Alert.alert("⚠️ Limite Atingido", `A soma máxima dos ramais selecionados é de ${limitePes} pés/tambores!`);
-      setQuantidade(limitePes.toString());
+      Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
+      setQuantidade(''); // Apaga o número digitado para ele não descobrir qual é o limite
     } else {
       setQuantidade(texto);
     }
@@ -231,69 +220,71 @@ export default function HomeScreen() {
       return Alert.alert("Aviso", "Preencha todos os campos!"); 
     }
     
-    const horaAtual = dataHoraAtual.toLocaleTimeString('pt-BR').substring(0, 5); 
-    if (horaAtual < horaInicioPermitida || horaAtual > horaFimPermitida) {
-      return Alert.alert(
-        "🚫 Fora do Expediente", 
-        `Lançamentos permitidos apenas entre ${horaInicioPermitida} e ${horaFimPermitida}.`
-      );
+    const dataMomento = new Date();
+    const horaAtualStr = dataMomento.toLocaleTimeString('pt-BR').substring(0, 5); 
+    
+    if (horaAtualStr < horaInicioPermitida || horaAtualStr > horaFimPermitida) {
+      return Alert.alert("🚫 Fora do Expediente", `Permitido apenas entre ${horaInicioPermitida} e ${horaFimPermitida}.`);
     }
 
-    const listaDeRamaisSelecionados = processarRamaisMuitos(ramal);
-    if (listaDeRamaisSelecionados.length === 0) {
-      return Alert.alert("Erro", "Formato de ramal inválido. Digite um número ou intervalo válido.");
+    const numRamal = ramal.trim();
+    
+    // Trava contra ramal fantasma
+    const ramalInfo = ramaisDisponiveis.find(r => String(r.ramal) === numRamal);
+    if (!ramalInfo) {
+      return Alert.alert("❌ Ramal Inválido", "Este ramal não está cadastrado nesta fazenda e quadra!");
     }
 
     const isServicoAtualCoringa = servicoSelecionadoCompleto?.is_coringa === true;
 
-    for (const numRamal of listaDeRamaisSelecionados) {
-      const ramalInfo = ramaisDisponiveis.find(r => r.ramal === numRamal);
-      
-      if (ramalInfo?.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
-        return Alert.alert("❌ Bloqueado", `O ramal ${numRamal} só aceita: ${ramalInfo.servico_permitido}.`); 
+    if (ramalInfo.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
+      return Alert.alert("❌ Bloqueado", `O ramal ${numRamal} só aceita: ${ramalInfo.servico_permitido}.`); 
+    }
+    
+    if (ramalInfo.data_bloqueio) {
+      const hojeISO = dataMomento.toISOString().split('T')[0];
+      if (hojeISO !== ramalInfo.data_bloqueio) { 
+        return Alert.alert("📅 Data Bloqueada", `Ramal ${numRamal} permitido apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
       }
+    }
 
-      if (ramalInfo?.data_bloqueio) {
-        const hojeISO = dataHoraAtual.toISOString().split('T')[0];
-        if (hojeISO !== ramalInfo.data_bloqueio) { 
-          return Alert.alert("📅 Data Bloqueada", `Lançamentos para o ramal ${numRamal} permitidos apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
-        }
-      }
+    // Trava de segurança final para o limite cego
+    if (limitePes !== null && parseInt(quantidade) > limitePes) {
+        setQuantidade('');
+        return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
     }
 
     setSalvando(true);
     let valorUnitario = servicoSelecionadoCompleto?.preco_base || 0;
     if (servicoSelecionadoCompleto?.tipo_cobranca === 'milheiro') valorUnitario = valorUnitario / 1000;
 
-    const quantidadePorRamal = Math.floor(parseInt(quantidade) / listaDeRamaisSelecionados.length);
-    const valorPorRamal = valorTotalCalculado / listaDeRamaisSelecionados.length;
-
     try {
-      const novosLancamentosMultiplos = listaDeRamaisSelecionados.map(numRamal => ({
+      const novoLancamento = {
         colaborador, 
         servico, 
         fazenda, 
         quadra, 
-        ramal: numRamal,
-        quantidade: quantidadePorRamal, 
+        ramal: numRamal, 
+        quantidade: parseInt(quantidade), 
         valor_unitario: valorUnitario, 
-        valor_total: valorPorRamal, 
-        data: dataHoraAtual.toISOString(),
+        valor_total: valorTotalCalculado, 
+        data: dataMomento.toISOString(),
         fiscal_nome: perfilLogado?.nome || 'Fiscal Não Identificado' 
-      }));
+      };
 
-      const novaLista = [...lancamentosPendentes, ...novosLancamentosMultiplos];
+      const novaLista = [...lancamentosPendentes, novoLancamento];
       await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
       setLancamentosPendentes(novaLista);
 
-      Alert.alert(
-        "✅ Salvo Offline", 
-        `Foram registrados ${listaDeRamaisSelecionados.length} ramais.\nValor total garantido: R$ ${valorTotalCalculado.toFixed(2).replace('.', ',')}`
-      );
+      // Limpa APENAS dados específicos, mantendo Colab e Localização para fluxo contínuo
+      setServico(''); 
+      setServicoSelecionadoCompleto(null);
+      setRamal(''); 
+      setQuantidade(''); 
+      setValorTotalCalculado(0);
 
-      setRamal(''); setQuantidade(''); setValorTotalCalculado(0);
     } catch (e) {
-      Alert.alert("Erro", "Não foi possível salvar.");
+      Alert.alert("Erro", "Não foi possível salvar no celular.");
     } finally {
       setSalvando(false);
     }
@@ -304,13 +295,10 @@ export default function HomeScreen() {
     setSincronizando(true);
 
     try {
-      const lancamentosProntosParaNuvem = [];
-
-      for (const item of lancamentosPendentes) {
-        // Limpa referências a fotos antigas caso o usuário tenha salvo na mochila antes da atualização
+      const lancamentosProntosParaNuvem = lancamentosPendentes.map(item => {
         const { foto_local, foto_url, ...dados } = item;
-        lancamentosProntosParaNuvem.push(dados);
-      }
+        return dados;
+      });
 
       const { error: dbError } = await supabase.from('diarios_campo').insert(lancamentosProntosParaNuvem);
       if (dbError) throw dbError;
@@ -318,43 +306,24 @@ export default function HomeScreen() {
       await AsyncStorage.removeItem('@lancamentos_off');
       setLancamentosPendentes([]);
       carregarDadosBase(perfilLogado, perfilLogado?.id || null);
-      Alert.alert("🚀 Sincronizado com Sucesso!", "Todas as produções foram enviadas para o servidor.");
+      Alert.alert("🚀 Sincronizado com Sucesso!", "Todas as produções foram enviadas.");
       
     } catch (e: any) {
-      Alert.alert("Erro na Sincronização", "O envio foi interrompido: " + e.message);
+      Alert.alert("Erro na Sincronização", "Envio interrompido: " + e.message);
     } finally {
       setSincronizando(false);
     }
   };
 
   const excluirLancamentoPendente = async (index: number) => {
-    Alert.alert("Excluir Lançamento", "Tem certeza que deseja apagar este registro?", [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Sim, Apagar", onPress: async () => {
-          const novaLista = [...lancamentosPendentes];
-          novaLista.splice(index, 1);
-          await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
-          setLancamentosPendentes(novaLista);
-        }
-      }
-    ]);
-  };
-
-  const editarLancamentoPendente = async (index: number) => {
-    const item = lancamentosPendentes[index];
     const novaLista = [...lancamentosPendentes];
     novaLista.splice(index, 1);
     await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
     setLancamentosPendentes(novaLista);
-
-    setColaborador(item.colaborador);
-    setServico(item.servico);
-    setFazenda(item.fazenda);
-    setQuadra(item.quadra);
-    
-    setModalPendentesVisivel(false);
-    Alert.alert("Modo Edição", "Altere o que precisar e salve novamente.");
   };
+
+  // Filtro visual para o Lote atual do Colaborador selecionado
+  const loteAtualColaborador = lancamentosPendentes.filter(l => l.colaborador === colaborador);
 
   return (
     <KeyboardAvoidingView 
@@ -368,9 +337,10 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* O segredo está aqui: flexGrow: 1 e paddingBottom: 300 */}
         <ScrollView 
           style={styles.container} 
-          contentContainerStyle={{ paddingBottom: 150 }}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 450 }} 
           keyboardShouldPersistTaps="handled"
         >
           
@@ -386,25 +356,20 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.header}>
-            <Text style={styles.title}>Brekaz Produção </Text>
-            <Text style={styles.subtitle}>Lançamento Livre para Todas as Equipes</Text>
-            <View style={styles.relogioBox}>
-                <Text style={styles.relogioTexto}>{dataHoraAtual.toLocaleDateString('pt-BR')} - {dataHoraAtual.toLocaleTimeString('pt-BR')}</Text>
-                <TouchableOpacity onPress={atualizarMochilaManual} style={styles.btnAtualizar}>
-                   <Text style={styles.btnAtualizarText}>🔄 Atualizar Base de Dados</Text>
-                </TouchableOpacity>
-            </View>
+            <Text style={styles.title}>Brekaz Produção</Text>
+            <Text style={styles.subtitle}>Lançamento Rápido em Lotes</Text>
+            <Relogio onAtualizar={atualizarMochilaManual} />
           </View>
 
           {lancamentosPendentes.length > 0 && (
             <View style={styles.syncCard}>
-              <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} lançamentos pendentes</Text>
+              <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} no total aguardando envio</Text>
               <View style={styles.syncBotoesRow}>
                 <TouchableOpacity style={styles.btnSyncVer} onPress={() => setModalPendentesVisivel(true)}>
-                  <Text style={styles.btnSyncVerTexto}>✏️ VER / EDITAR</Text>
+                  <Text style={styles.btnSyncVerTexto}>✏️ VER TODOS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.btnSync} onPress={sincronizarComBanco} disabled={sincronizando}>
-                  {sincronizando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSyncTexto}>🚀 ENVIAR TUDO</Text>}
+                  {sincronizando ? <ActivityIndicator color="#F39C12" size="small" /> : <Text style={styles.btnSyncTexto}>🚀 ENVIAR TUDO</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -418,46 +383,65 @@ export default function HomeScreen() {
                 <Text style={styles.label}>Colaborador:</Text>
                 <View style={styles.pickerContainer}>
                   <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
-                    <Picker.Item label="Quem está trabalhando?" value="" />
+                    <Picker.Item label="Selecione o Colaborador..." value="" />
                     {listaColaboradores.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
                   </Picker>
                 </View>
 
-                <Text style={styles.label}>Serviço:</Text>
-                <View style={styles.pickerContainer}>
-                  <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
-                    <Picker.Item label="Qual o serviço?" value="" />
-                    {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
-                  </Picker>
+                {/* Seções agrupadas para agilidade */}
+                <View style={styles.row}>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Fazenda:</Text>
+                    <View style={styles.pickerContainer}>
+                      <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
+                        <Picker.Item label="..." value="" />
+                        {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                      </Picker>
+                    </View>
+                  </View>
+
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Quadra:</Text>
+                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}>
+                      <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
+                        <Picker.Item label="..." value="" />
+                        {quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}
+                      </Picker>
+                    </View>
+                  </View>
                 </View>
 
-                <Text style={styles.label}>Fazenda:</Text>
+                <Text style={styles.label}>Serviço Feito:</Text>
                 <View style={styles.pickerContainer}>
-                  <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
-                    <Picker.Item label="Selecione a fazenda..." value="" />
-                    {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                  <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
+                    <Picker.Item label="Selecione o Serviço..." value="" />
+                    {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
                   </Picker>
                 </View>
 
                 <View style={styles.row}>
                   <View style={styles.col}>
-                    <Text style={styles.label}>Quadra:</Text>
-                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}><Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}><Picker.Item label="..." value="" />{quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}</Picker></View>
-                  </View>
-                  <View style={styles.col}>
-                    <Text style={styles.label}>Ramal (Ex: 1-4 ou 1,3):</Text>
+                    <Text style={styles.label}>Ramal:</Text>
                     <TextInput 
-                      style={[styles.input, !quadra && styles.disabledInput, { height: 50, padding: 10, fontSize: 16 }]} 
-                      placeholder="1, 2, 3" 
+                      style={[styles.input, !quadra && styles.disabledInput]} 
+                      placeholder="Ex: 1" 
                       value={ramal} 
                       onChangeText={setRamal} 
                       editable={!!quadra} 
                     />
                   </View>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Quantidade:</Text>
+                    <TextInput 
+                      style={[styles.input, !ramal && styles.disabledInput]} 
+                      placeholder="Qtd." 
+                      keyboardType="numeric" 
+                      value={quantidade} 
+                      onChangeText={handleMudancaQuantidade} 
+                      editable={!!ramal} 
+                    />
+                  </View>
                 </View>
-
-                <Text style={styles.label}>Quantidade (Pés / Tambores):</Text>
-                <TextInput style={[styles.input, !ramal && styles.disabledInput]} placeholder="Soma total dos ramais" keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} />
 
                 {valorTotalCalculado > 0 && (
                   <View style={styles.cardGanho}>
@@ -467,13 +451,36 @@ export default function HomeScreen() {
                 )}
 
                 <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
-                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 SALVAR PARA ENVIO</Text>}
+                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>➕ ADICIONAR AO LOTE</Text>}
                 </TouchableOpacity>
+
+                {/* SESSÃO DO LOTE ATUAL */}
+                {colaborador !== '' && loteAtualColaborador.length > 0 && (
+                  <View style={styles.loteContainer}>
+                    <Text style={styles.loteTitulo}>📝 Lote de {colaborador}:</Text>
+                    {loteAtualColaborador.map((lote, index) => (
+                      <View key={index} style={styles.loteItem}>
+                        <Ionicons name="checkmark-circle" size={16} color="#27AE60" style={{ marginTop: 2 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.loteItemTextoBold}>
+                            {lote.fazenda} - Q: {lote.quadra}
+                          </Text>
+                          <Text style={styles.loteItemTexto}>
+                            {lote.servico} (R: {lote.ramal}) ➔ {lote.quantidade} un
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                    <Text style={styles.loteDica}>Pronto para adicionar outro ramal ou serviço!</Text>
+                  </View>
+                )}
+
               </>
             )}
           </View>
         </ScrollView>
 
+        {/* MODAIS */}
         <Modal visible={modalEquipeVisivel} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -508,13 +515,10 @@ export default function HomeScreen() {
                     <View key={index} style={styles.itemPendente}>
                       <View style={styles.itemInfo}>
                         <Text style={styles.itemColab}>{item.colaborador}</Text>
-                        <Text style={styles.itemDetalhes}>{item.servico} | Ramal: {item.ramal}</Text>
-                        <Text style={styles.itemDetalhes}>Qtd: {item.quantidade} | R$ {item.valor_total.toFixed(2)}</Text>
+                        <Text style={styles.itemDetalhes}>{item.fazenda} | Q: {item.quadra} | R: {item.ramal}</Text>
+                        <Text style={styles.itemDetalhes}>{item.servico} | Qtd: {item.quantidade} | R$ {item.valor_total.toFixed(2)}</Text>
                       </View>
                       <View style={styles.itemAcoes}>
-                        <TouchableOpacity style={styles.btnEditarPendente} onPress={() => editarLancamentoPendente(index)}>
-                          <Text style={styles.btnAcaoTexto}>✏️</Text>
-                        </TouchableOpacity>
                         <TouchableOpacity style={styles.btnApagarPendente} onPress={() => excluirLancamentoPendente(index)}>
                           <Text style={styles.btnAcaoTexto}>🗑️</Text>
                         </TouchableOpacity>
@@ -561,7 +565,7 @@ const styles = StyleSheet.create({
   pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden' },
   picker: { height: 50, width: '100%' },
   disabled: { backgroundColor: '#EAECEE', opacity: 0.6 },
-  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 55 },
+  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
   disabledInput: { backgroundColor: '#EAECEE' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '48%' },
@@ -570,7 +574,16 @@ const styles = StyleSheet.create({
   valorGanho: { color: '#1E8449', fontSize: 24, fontWeight: '900' },
   button: { backgroundColor: '#2980B9', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 15 },
   buttonDisabled: { backgroundColor: '#95A5A6' },
-  buttonText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  
+  /* ESTILOS DO LOTE (CARRINHO RICA) */
+  loteContainer: { marginTop: 25, backgroundColor: '#F9EBEA', padding: 15, borderRadius: 10, borderLeftWidth: 4, borderLeftColor: '#E74C3C' },
+  loteTitulo: { fontSize: 15, fontWeight: 'bold', color: '#C0392B', marginBottom: 10 },
+  loteItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10, gap: 8 },
+  loteItemTextoBold: { fontSize: 14, fontWeight: 'bold', color: '#2C3E50' },
+  loteItemTexto: { fontSize: 13, color: '#34495E', marginTop: 2 },
+  loteDica: { fontSize: 11, color: '#7F8C8D', fontStyle: 'italic', marginTop: 10, textAlign: 'center' },
+
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFF', width: '100%', borderRadius: 15, padding: 20, elevation: 10 },
   modalContentGrande: { backgroundColor: '#FFF', width: '100%', borderRadius: 15, padding: 20, elevation: 10, flex: 0.9 },
@@ -583,7 +596,6 @@ const styles = StyleSheet.create({
   itemColab: { fontSize: 16, fontWeight: 'bold', color: '#2C3E50' },
   itemDetalhes: { fontSize: 13, color: '#7F8C8D', marginTop: 2 },
   itemAcoes: { flexDirection: 'row', gap: 10 },
-  btnEditarPendente: { backgroundColor: '#F1C40F', padding: 10, borderRadius: 8 },
   btnApagarPendente: { backgroundColor: '#E74C3C', padding: 10, borderRadius: 8 },
   btnAcaoTexto: { fontSize: 16 },
   btnFecharModal: { backgroundColor: '#95A5A6', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 15 },

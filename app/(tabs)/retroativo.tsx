@@ -1,10 +1,35 @@
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
+// =========================================================================
+// COMPONENTE ISOLADO DE RELÓGIO (Apenas para exibir a hora atual do aparelho)
+// =========================================================================
+const Relogio = memo(({ onAtualizar }: { onAtualizar: () => void }) => {
+  const [horaAtual, setHoraAtual] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setHoraAtual(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View style={styles.relogioBox}>
+      <Text style={styles.relogioTexto}>{horaAtual.toLocaleDateString('pt-BR')} - {horaAtual.toLocaleTimeString('pt-BR')}</Text>
+      <TouchableOpacity onPress={onAtualizar} style={styles.btnAtualizar}>
+        <Text style={styles.btnAtualizarText}>🔄 Atualizar Base de Dados</Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+// =========================================================================
+// TELA RETROATIVA
+// =========================================================================
 export default function RetroativoScreen() {
   const [colaborador, setColaborador] = useState('');
   const [servico, setServico] = useState('');
@@ -15,9 +40,10 @@ export default function RetroativoScreen() {
   const [ramal, setRamal] = useState(''); 
   const [quantidade, setQuantidade] = useState('');
   const [valorTotalCalculado, setValorTotalCalculado] = useState(0);
-  
-  // 👉 Campo de Data Manual
-  const [dataManual, setDataManual] = useState('');
+
+  // 👉 NOVOS CAMPOS PARA O MODO RETROATIVO
+  const [dataRetroativa, setDataRetroativa] = useState('');
+  const [horaRetroativa, setHoraRetroativa] = useState('');
   
   const [listaColaboradores, setListaColaboradores] = useState<any[]>([]);
   const [listaServicos, setListaServicos] = useState<any[]>([]);
@@ -31,27 +57,23 @@ export default function RetroativoScreen() {
   const [carregandoDados, setCarregandoDados] = useState(true);
 
   const [perfilLogado, setPerfilLogado] = useState<any>(null);
+  const [lancamentosPendentes, setLancamentosPendentes] = useState<any[]>([]);
+  const [sincronizando, setSincronizando] = useState(false);
+  
   const [isOffline, setIsOffline] = useState(false);
 
   const [modalEquipeVisivel, setModalEquipeVisivel] = useState(false);
+  const [modalPendentesVisivel, setModalPendentesVisivel] = useState(false);
 
   useEffect(() => {
     carregarUsuarioLogado(); 
+    carregarLancamentosLocais(); 
     
-    // Sugere a data de ontem automaticamente para facilitar
-    const ontem = new Date();
-    ontem.setDate(ontem.getDate() - 1);
-    setDataManual(ontem.toLocaleDateString('pt-BR'));
+    // Sugere a data e hora atual para facilitar, mas deixa editável
+    const hoje = new Date();
+    setDataRetroativa(hoje.toLocaleDateString('pt-BR'));
+    setHoraRetroativa(hoje.toLocaleTimeString('pt-BR').substring(0, 5));
   }, []);
-
-  // Máscara de Data
-  const aplicarMascaraData = (texto: string) => {
-    let v = texto.replace(/\D/g, ''); 
-    if (v.length > 8) v = v.substring(0, 8); 
-    if (v.length > 4) v = v.replace(/^(\d{2})(\d{2})(\d{1,4}).*/, '$1/$2/$3');
-    else if (v.length > 2) v = v.replace(/^(\d{2})(\d{1,2}).*/, '$1/$2');
-    return v;
-  };
 
   const carregarUsuarioLogado = async () => {
     try {
@@ -60,18 +82,13 @@ export default function RetroativoScreen() {
 
       if (session && !sessionError) {
         const { data: perfilData, error: perfilError } = await supabase.from('perfis').select('*').eq('id', session.user.id).single();
-        
         if (perfilData && !perfilError) {
           setPerfilLogado(perfilData);
           await AsyncStorage.setItem('@perfil_offline', JSON.stringify(perfilData));
           carregarDadosBase();
           setIsOffline(false);
-        } else {
-          acionarMochilaDePerfil(perfilSalvoStr);
-        }
-      } else {
-        acionarMochilaDePerfil(perfilSalvoStr);
-      }
+        } else acionarMochilaDePerfil(perfilSalvoStr);
+      } else acionarMochilaDePerfil(perfilSalvoStr);
     } catch (e) {
       const perfilSalvoStr = await AsyncStorage.getItem('@perfil_offline');
       acionarMochilaDePerfil(perfilSalvoStr);
@@ -84,9 +101,14 @@ export default function RetroativoScreen() {
       const p = JSON.parse(perfilSalvoStr);
       setPerfilLogado(p);
       carregarDadosBase();
-    } else {
-      router.replace('/');
-    }
+    } else router.replace('/');
+  };
+
+  const carregarLancamentosLocais = async () => {
+    try {
+      const dados = await AsyncStorage.getItem('@lancamentos_off');
+      if (dados) setLancamentosPendentes(JSON.parse(dados));
+    } catch (e) {}
   };
 
   const carregarDadosBase = async () => {
@@ -123,7 +145,7 @@ export default function RetroativoScreen() {
     setCarregandoDados(false);
   };
 
-  const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados na nuvem..."); };
+  const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados..."); };
 
   useEffect(() => {
     setQuadra(''); setRamal(''); setLimitePes(null);
@@ -137,45 +159,14 @@ export default function RetroativoScreen() {
     else setRamaisDisponiveis([]);
   }, [quadra]);
 
-  const processarRamaisMuitos = (input: string) => {
-    const listaFinal: string[] = [];
-    const partes = input.split(',');
-
-    partes.forEach(parte => {
-      const trecho = parte.trim();
-      if (trecho.includes('-')) {
-        const [inicio, fim] = trecho.split('-').map(Number);
-        if (!isNaN(inicio) && !isNaN(fim)) {
-          for (let i = inicio; i <= fim; i++) {
-            listaFinal.push(i.toString());
-          }
-        }
-      } else if (trecho !== '') {
-        listaFinal.push(trecho);
-      }
-    });
-
-    return Array.from(new Set(listaFinal));
-  };
-
   useEffect(() => {
-    const listaRamais = processarRamaisMuitos(ramal);
-    if (listaRamais.length > 0) {
-      let somaLimites = 0;
-      let encontrouAlgumComLimite = false;
-
-      listaRamais.forEach(numRamal => {
-        const ramalSelecionado = ramaisDisponiveis.find(r => r.ramal === numRamal);
-        if (ramalSelecionado && ramalSelecionado.total_pes) {
-          somaLimites += ramalSelecionado.total_pes;
-          encontrouAlgumComLimite = true;
-        }
-      });
-
-      setLimitePes(encontrouAlgumComLimite ? somaLimites : null);
-    } else {
-      setLimitePes(null);
-    }
+    const numRamal = ramal.trim();
+    if (numRamal) {
+      const ramalSelecionado = ramaisDisponiveis.find(r => String(r.ramal) === numRamal);
+      if (ramalSelecionado && ramalSelecionado.total_pes) {
+        setLimitePes(ramalSelecionado.total_pes);
+      } else setLimitePes(null);
+    } else setLimitePes(null);
   }, [ramal, ramaisDisponiveis]);
 
   useEffect(() => {
@@ -187,94 +178,143 @@ export default function RetroativoScreen() {
     } else setValorTotalCalculado(0);
   }, [servicoSelecionadoCompleto, quantidade]);
 
+  // Alerta Cego
   const handleMudancaQuantidade = (texto: string) => {
     const valorDigitado = parseInt(texto) || 0;
     if (limitePes !== null && valorDigitado > limitePes) {
-      Alert.alert("⚠️ Limite Atingido", `A soma máxima dos ramais selecionados é de ${limitePes} pés!`);
-      setQuantidade(limitePes.toString());
+      Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
+      setQuantidade(''); 
     } else {
       setQuantidade(texto);
     }
   };
 
+  // 👉 MÁSCARAS PARA DATA E HORA RETROATIVAS
+  const handleDataChange = (text: string) => {
+    let v = text.replace(/\D/g, '');
+    if (v.length > 2) v = v.replace(/^(\d{2})(\d)/, '$1/$2');
+    if (v.length > 5) v = v.replace(/^(\d{2})\/(\d{2})(\d)/, '$1/$2/$3');
+    setDataRetroativa(v.substring(0, 10));
+  };
+
+  const handleHoraChange = (text: string) => {
+    let v = text.replace(/\D/g, '');
+    if (v.length > 2) v = v.replace(/^(\d{2})(\d)/, '$1:$2');
+    setHoraRetroativa(v.substring(0, 5));
+  };
+
   const salvarLancamento = async () => {
-    if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade || !dataManual) { 
-      return Alert.alert("Aviso", "Preencha todos os campos e a data!"); 
+    if (!colaborador || !servico || !fazenda || !quadra || !ramal || !quantidade || !dataRetroativa || !horaRetroativa) { 
+      return Alert.alert("Aviso", "Preencha todos os campos, incluindo a Data e Hora!"); 
     }
 
-    if (dataManual.length !== 10) {
-      return Alert.alert("Aviso", "A data deve estar no formato DD/MM/AAAA");
-    }
+    if (dataRetroativa.length !== 10) return Alert.alert("Erro", "Formato de data inválido. Use DD/MM/AAAA");
+    if (horaRetroativa.length !== 5) return Alert.alert("Erro", "Formato de hora inválido. Use HH:MM");
 
-    const listaDeRamaisSelecionados = processarRamaisMuitos(ramal);
-    if (listaDeRamaisSelecionados.length === 0) {
-      return Alert.alert("Erro", "Formato de ramal inválido.");
+    // 👉 NÃO TEM MAIS TRAVA DE HORÁRIO! LIBERADO TOTALMENTE!
+    const numRamal = ramal.trim();
+    const ramalInfo = ramaisDisponiveis.find(r => String(r.ramal) === numRamal);
+    if (!ramalInfo) {
+      return Alert.alert("❌ Ramal Inválido", "Este ramal não está cadastrado nesta fazenda e quadra!");
     }
 
     const isServicoAtualCoringa = servicoSelecionadoCompleto?.is_coringa === true;
 
-    for (const numRamal of listaDeRamaisSelecionados) {
-      const ramalInfo = ramaisDisponiveis.find(r => r.ramal === numRamal);
-      if (ramalInfo?.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
-        return Alert.alert("❌ Bloqueado", `O ramal ${numRamal} só aceita: ${ramalInfo.servico_permitido}.`); 
-      }
+    if (ramalInfo.servico_permitido && servico !== ramalInfo.servico_permitido && !isServicoAtualCoringa) { 
+      return Alert.alert("❌ Bloqueado", `O ramal ${numRamal} só aceita: ${ramalInfo.servico_permitido}.`); 
+    }
+
+    // Formata a data e hora digitada pelo usuário
+    const [dia, mes, ano] = dataRetroativa.split('/');
+    const hojeISO = `${ano}-${mes}-${dia}`;
+    const dataIsoFinal = `${hojeISO}T${horaRetroativa}:00.000Z`; // String combinada
+
+    if (ramalInfo.data_bloqueio && hojeISO !== ramalInfo.data_bloqueio) { 
+      return Alert.alert("📅 Data Bloqueada", `Ramal ${numRamal} permitido apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
+    }
+
+    if (limitePes !== null && parseInt(quantidade) > limitePes) {
+        setQuantidade('');
+        return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
     }
 
     setSalvando(true);
     let valorUnitario = servicoSelecionadoCompleto?.preco_base || 0;
     if (servicoSelecionadoCompleto?.tipo_cobranca === 'milheiro') valorUnitario = valorUnitario / 1000;
 
-    const quantidadePorRamal = Math.floor(parseInt(quantidade) / listaDeRamaisSelecionados.length);
-    const valorPorRamal = valorTotalCalculado / listaDeRamaisSelecionados.length;
-
-    const partesData = dataManual.split('/');
-    const dataIsoParaSalvar = `${partesData[2]}-${partesData[1]}-${partesData[0]}T12:00:00.000Z`;
-
     try {
-      const novosLancamentosMultiplos = listaDeRamaisSelecionados.map(numRamal => ({
+      const novoLancamento = {
         colaborador, 
         servico, 
         fazenda, 
         quadra, 
-        ramal: numRamal,
-        quantidade: quantidadePorRamal, 
+        ramal: numRamal, 
+        quantidade: parseInt(quantidade), 
         valor_unitario: valorUnitario, 
-        valor_total: valorPorRamal, 
-        data: dataIsoParaSalvar, 
-        fiscal_nome: perfilLogado?.nome || 'Lançamento Retroativo' 
-      }));
+        valor_total: valorTotalCalculado, 
+        data: dataIsoFinal, // 👉 SALVANDO A DATA/HORA RETROATIVA
+        fiscal_nome: perfilLogado?.nome || 'Fiscal Não Identificado' 
+      };
 
-      // 👉 SALVA 100% ONLINE DIRETO NO SUPABASE
-      const { error } = await supabase.from('diarios_campo').insert(novosLancamentosMultiplos);
-      
-      if (error) throw error;
+      const novaLista = [...lancamentosPendentes, novoLancamento];
+      await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
+      setLancamentosPendentes(novaLista);
 
-      Alert.alert(
-        "✅ Sucesso!", 
-        `Lançamento retroativo enviado para a nuvem na data ${dataManual}.\nValor total: R$ ${valorTotalCalculado.toFixed(2).replace('.', ',')}`
-      );
-
-      setRamal(''); setQuantidade(''); setValorTotalCalculado(0);
-    } catch (e: any) {
-      Alert.alert(
-        "Erro de Conexão", 
-        "Você precisa de internet para salvar um retroativo. Verifique sua conexão e tente novamente."
-      );
+      setServico(''); 
+      setServicoSelecionadoCompleto(null);
+      setRamal(''); 
+      setQuantidade(''); 
+      setValorTotalCalculado(0);
+    } catch (e) {
+      Alert.alert("Erro", "Não foi possível salvar no celular.");
     } finally {
       setSalvando(false);
     }
   };
+
+  const sincronizarComBanco = async () => {
+    if (lancamentosPendentes.length === 0) return;
+    setSincronizando(true);
+
+    try {
+      const lancamentosProntosParaNuvem = lancamentosPendentes.map(item => {
+        const { foto_local, foto_url, ...dados } = item;
+        return dados;
+      });
+
+      const { error: dbError } = await supabase.from('diarios_campo').insert(lancamentosProntosParaNuvem);
+      if (dbError) throw dbError;
+      
+      await AsyncStorage.removeItem('@lancamentos_off');
+      setLancamentosPendentes([]);
+      carregarDadosBase();
+      Alert.alert("🚀 Sincronizado!", "Produções retroativas enviadas.");
+    } catch (e: any) {
+      Alert.alert("Erro na Sincronização", "Envio interrompido: " + e.message);
+    } finally {
+      setSincronizando(false);
+    }
+  };
+
+  const excluirLancamentoPendente = async (index: number) => {
+    const novaLista = [...lancamentosPendentes];
+    novaLista.splice(index, 1);
+    await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(novaLista));
+    setLancamentosPendentes(novaLista);
+  };
+
+  const loteAtualColaborador = lancamentosPendentes.filter(l => l.colaborador === colaborador);
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{flex: 1}}>
         {isOffline && (
           <View style={styles.offlineBadge}>
-            <Text style={styles.offlineText}>⚠️ ATENÇÃO: Você está sem internet. Retroativos exigem conexão.</Text>
+            <Text style={styles.offlineText}>⚠️ MODO OFFLINE ATIVADO</Text>
           </View>
         )}
 
-        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 150 }} keyboardShouldPersistTaps="handled">
+        <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1, paddingBottom: 450 }} keyboardShouldPersistTaps="handled">
           
           <View style={styles.topBar}>
             {perfilLogado ? (
@@ -288,70 +328,104 @@ export default function RetroativoScreen() {
           </View>
 
           <View style={styles.header}>
-            <Text style={styles.titleRetro}>Lançamento Retroativo ⏳</Text>
-            <Text style={styles.subtitle}>Registro 100% Online de dias anteriores</Text>
-            <View style={styles.relogioBox}>
-                <Text style={{color: '#FFF', fontWeight: 'bold', marginBottom: 5}}>Data do Serviço:</Text>
-                <TextInput 
-                  style={styles.inputDataManual} 
-                  placeholder="DD/MM/AAAA"
-                  placeholderTextColor="#95A5A6"
-                  keyboardType="numeric"
-                  maxLength={10}
-                  value={dataManual}
-                  onChangeText={(t) => setDataManual(aplicarMascaraData(t))}
-                />
-            </View>
+            <Text style={styles.title}>Brekaz Retroativo ⏳</Text>
+            <Text style={styles.subtitle}>Lançamentos com data/hora manuais</Text>
+            <Relogio onAtualizar={atualizarMochilaManual} />
           </View>
+
+          {lancamentosPendentes.length > 0 && (
+            <View style={styles.syncCard}>
+              <Text style={styles.syncTexto}>📦 {lancamentosPendentes.length} no total aguardando envio</Text>
+              <View style={styles.syncBotoesRow}>
+                <TouchableOpacity style={styles.btnSyncVer} onPress={() => setModalPendentesVisivel(true)}>
+                  <Text style={styles.btnSyncVerTexto}>✏️ VER TODOS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.btnSync} onPress={sincronizarComBanco} disabled={sincronizando}>
+                  {sincronizando ? <ActivityIndicator color="#F39C12" size="small" /> : <Text style={styles.btnSyncTexto}>🚀 ENVIAR TUDO</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           <View style={styles.card}>
             {carregandoDados ? (
-              <ActivityIndicator size="large" color="#E67E22" />
+              <ActivityIndicator size="large" color="#27AE60" />
             ) : (
               <>
                 <Text style={styles.label}>Colaborador:</Text>
                 <View style={styles.pickerContainer}>
                   <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
-                    <Picker.Item label="Quem trabalhou neste dia?" value="" />
+                    <Picker.Item label="Selecione o Colaborador..." value="" />
                     {listaColaboradores.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
                   </Picker>
                 </View>
 
-                <Text style={styles.label}>Serviço:</Text>
-                <View style={styles.pickerContainer}>
-                  <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
-                    <Picker.Item label="Qual foi o serviço?" value="" />
-                    {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
-                  </Picker>
+                {/* 👉 BLOCO DE DATA E HORA RETROATIVAS */}
+                <View style={[styles.row, { marginTop: 5, marginBottom: 10, padding: 10, backgroundColor: '#FEF9E7', borderRadius: 8, borderWidth: 1, borderColor: '#F1C40F' }]}>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Data (Retroativa):</Text>
+                    <TextInput 
+                      style={[styles.input, { backgroundColor: '#FFF' }]} 
+                      placeholder="DD/MM/AAAA" 
+                      value={dataRetroativa} 
+                      onChangeText={handleDataChange} 
+                      keyboardType="numeric" 
+                      maxLength={10}
+                    />
+                  </View>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Hora Exata:</Text>
+                    <TextInput 
+                      style={[styles.input, { backgroundColor: '#FFF' }]} 
+                      placeholder="HH:MM" 
+                      value={horaRetroativa} 
+                      onChangeText={handleHoraChange} 
+                      keyboardType="numeric" 
+                      maxLength={5}
+                    />
+                  </View>
                 </View>
 
-                <Text style={styles.label}>Fazenda:</Text>
+                <View style={styles.row}>
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Fazenda:</Text>
+                    <View style={styles.pickerContainer}>
+                      <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
+                        <Picker.Item label="..." value="" />
+                        {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                      </Picker>
+                    </View>
+                  </View>
+
+                  <View style={styles.col}>
+                    <Text style={styles.label}>Quadra:</Text>
+                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}>
+                      <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
+                        <Picker.Item label="..." value="" />
+                        {quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}
+                      </Picker>
+                    </View>
+                  </View>
+                </View>
+
+                <Text style={styles.label}>Serviço Feito:</Text>
                 <View style={styles.pickerContainer}>
-                  <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
-                    <Picker.Item label="Selecione a fazenda..." value="" />
-                    {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                  <Picker selectedValue={servico} onValueChange={(v) => { setServico(v); setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === v)); }} style={styles.picker}>
+                    <Picker.Item label="Selecione o Serviço..." value="" />
+                    {listaServicos.map((item) => (<Picker.Item key={item.id} label={item.nome} value={item.nome} />))}
                   </Picker>
                 </View>
 
                 <View style={styles.row}>
                   <View style={styles.col}>
-                    <Text style={styles.label}>Quadra:</Text>
-                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}><Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}><Picker.Item label="..." value="" />{quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}</Picker></View>
+                    <Text style={styles.label}>Ramal:</Text>
+                    <TextInput style={[styles.input, !quadra && styles.disabledInput]} placeholder="Ex: 1" value={ramal} onChangeText={setRamal} editable={!!quadra} />
                   </View>
                   <View style={styles.col}>
-                    <Text style={styles.label}>Ramal (Ex: 1-4 ou 1,3):</Text>
-                    <TextInput 
-                      style={[styles.input, !quadra && styles.disabledInput, { height: 50, padding: 10, fontSize: 16 }]} 
-                      placeholder="1, 2, 3" 
-                      value={ramal} 
-                      onChangeText={setRamal} 
-                      editable={!!quadra} 
-                    />
+                    <Text style={styles.label}>Quantidade:</Text>
+                    <TextInput style={[styles.input, !ramal && styles.disabledInput]} placeholder="Qtd." keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} />
                   </View>
                 </View>
-
-                <Text style={styles.label}>Quantidade (Pés / Tambores):</Text>
-                <TextInput style={[styles.input, !ramal && styles.disabledInput]} placeholder="Soma total dos ramais" keyboardType="numeric" value={quantidade} onChangeText={handleMudancaQuantidade} editable={!!ramal} />
 
                 {valorTotalCalculado > 0 && (
                   <View style={styles.cardGanho}>
@@ -360,9 +434,33 @@ export default function RetroativoScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity style={[styles.buttonRetro, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando || isOffline}>
-                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>💾 ENVIAR PARA NUVEM</Text>}
+                <TouchableOpacity style={[styles.button, salvando && styles.buttonDisabled]} onPress={salvarLancamento} disabled={salvando}>
+                  {salvando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>➕ ADICIONAR AO LOTE</Text>}
                 </TouchableOpacity>
+
+                {colaborador !== '' && loteAtualColaborador.length > 0 && (
+                  <View style={styles.loteContainer}>
+                    <Text style={styles.loteTitulo}>📝 Lote de {colaborador}:</Text>
+                    {loteAtualColaborador.map((lote, index) => {
+                      // Extrai apenas a data para mostrar no carrinho
+                      const dataVisor = lote.data.split('T')[0].split('-').reverse().join('/');
+                      return (
+                        <View key={index} style={styles.loteItem}>
+                          <Ionicons name="checkmark-circle" size={16} color="#27AE60" style={{ marginTop: 2 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.loteItemTextoBold}>
+                              {lote.fazenda} - Q: {lote.quadra} <Text style={{color: '#E74C3C'}}>({dataVisor})</Text>
+                            </Text>
+                            <Text style={styles.loteItemTexto}>
+                              {lote.servico} (R: {lote.ramal}) ➔ {lote.quantidade} un
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                    <Text style={styles.loteDica}>Pronto para adicionar outro ramal ou serviço!</Text>
+                  </View>
+                )}
               </>
             )}
           </View>
@@ -390,6 +488,39 @@ export default function RetroativoScreen() {
           </View>
         </Modal>
 
+        <Modal visible={modalPendentesVisivel} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContentGrande}>
+              <Text style={styles.modalTitle}>Lançamentos Pendentes</Text>
+              <ScrollView style={{maxHeight: 500}}>
+                {lancamentosPendentes.length === 0 ? (
+                  <Text style={styles.textoVazio}>Nenhum lançamento offline.</Text>
+                ) : (
+                  lancamentosPendentes.map((item, index) => {
+                    const dataPendente = item.data.split('T')[0].split('-').reverse().join('/');
+                    return (
+                      <View key={index} style={styles.itemPendente}>
+                        <View style={styles.itemInfo}>
+                          <Text style={styles.itemColab}>{item.colaborador} - <Text style={{color: '#E74C3C', fontSize: 13}}>{dataPendente}</Text></Text>
+                          <Text style={styles.itemDetalhes}>{item.fazenda} | Q: {item.quadra} | R: {item.ramal}</Text>
+                          <Text style={styles.itemDetalhes}>{item.servico} | Qtd: {item.quantidade} | R$ {item.valor_total.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.itemAcoes}>
+                          <TouchableOpacity style={styles.btnApagarPendente} onPress={() => excluirLancamentoPendente(index)}>
+                            <Text style={styles.btnAcaoTexto}>🗑️</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+              <TouchableOpacity style={styles.btnFecharModal} onPress={() => setModalPendentesVisivel(false)}>
+                <Text style={styles.btnFecharTexto}>VOLTAR</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -397,40 +528,61 @@ export default function RetroativoScreen() {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#F5F7FA', padding: 20 },
-  offlineBadge: { backgroundColor: '#C0392B', padding: 10, alignItems: 'center', justifyContent: 'center' },
-  offlineText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, textAlign: 'center' },
+  offlineBadge: { backgroundColor: '#E74C3C', padding: 8, alignItems: 'center', justifyContent: 'center' },
+  offlineText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5, backgroundColor: '#FFF', padding: 12, borderRadius: 8, elevation: 2 },
   userText: { fontSize: 13, fontWeight: 'bold', color: '#2C3E50', flex: 1 },
   btnEquipe: { backgroundColor: '#3498DB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 5, marginRight: 8 },
   btnEquipeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   header: { marginBottom: 20, marginTop: 10, alignItems: 'center' },
-  titleRetro: { fontSize: 26, fontWeight: 'bold', color: '#D35400' }, 
-  subtitle: { fontSize: 15, color: '#7F8C8D', textAlign: 'center' },
-  relogioBox: { backgroundColor: '#D35400', padding: 15, borderRadius: 8, marginTop: 15, alignItems: 'center', width: '100%' }, 
-  inputDataManual: { backgroundColor: '#FFF', width: '60%', padding: 10, borderRadius: 8, textAlign: 'center', fontSize: 18, fontWeight: 'bold', color: '#2C3E50' },
+  title: { fontSize: 28, fontWeight: 'bold', color: '#2C3E50' },
+  subtitle: { fontSize: 16, color: '#7F8C8D', textAlign: 'center' },
+  relogioBox: { backgroundColor: '#34495E', padding: 10, borderRadius: 8, marginTop: 15, alignItems: 'center', width: '100%' },
+  relogioTexto: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  btnAtualizar: { backgroundColor: '#27AE60', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginTop: 10 },
+  btnAtualizarText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  syncCard: { backgroundColor: '#F39C12', padding: 15, borderRadius: 12, marginBottom: 20, alignItems: 'center' },
+  syncTexto: { color: '#FFF', fontWeight: 'bold', marginBottom: 10 },
+  syncBotoesRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
+  btnSyncVer: { backgroundColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8, flex: 1, marginRight: 10, alignItems: 'center' },
+  btnSyncVerTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  btnSync: { backgroundColor: '#FFF', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8, flex: 1, alignItems: 'center' },
+  btnSyncTexto: { color: '#F39C12', fontWeight: 'bold', fontSize: 12 },
   card: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 15, elevation: 5 },
   label: { fontSize: 14, fontWeight: '700', color: '#34495E', marginBottom: 5, marginTop: 15 },
   pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden' },
   picker: { height: 50, width: '100%' },
   disabled: { backgroundColor: '#EAECEE', opacity: 0.6 },
-  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 55 },
+  input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
   disabledInput: { backgroundColor: '#EAECEE' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '48%' },
   cardGanho: { backgroundColor: '#E8F8F5', padding: 15, borderRadius: 10, marginTop: 20, alignItems: 'center', borderLeftWidth: 5, borderLeftColor: '#27AE60' },
   textoGanho: { color: '#1E8449', fontSize: 13, fontWeight: 'bold' },
   valorGanho: { color: '#1E8449', fontSize: 24, fontWeight: '900' },
-  buttonRetro: { backgroundColor: '#D35400', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 15 }, 
+  button: { backgroundColor: '#2980B9', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 15 },
   buttonDisabled: { backgroundColor: '#95A5A6' },
-  buttonText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  loteContainer: { marginTop: 25, backgroundColor: '#F9EBEA', padding: 15, borderRadius: 10, borderLeftWidth: 4, borderLeftColor: '#E74C3C' },
+  loteTitulo: { fontSize: 15, fontWeight: 'bold', color: '#C0392B', marginBottom: 10 },
+  loteItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10, gap: 8 },
+  loteItemTextoBold: { fontSize: 14, fontWeight: 'bold', color: '#2C3E50' },
+  loteItemTexto: { fontSize: 13, color: '#34495E', marginTop: 2 },
+  loteDica: { fontSize: 11, color: '#7F8C8D', fontStyle: 'italic', marginTop: 10, textAlign: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFF', width: '100%', borderRadius: 15, padding: 20, elevation: 10 },
+  modalContentGrande: { backgroundColor: '#FFF', width: '100%', borderRadius: 15, padding: 20, elevation: 10, flex: 0.9 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#2C3E50', marginBottom: 15, textAlign: 'center' },
   textoVazio: { textAlign: 'center', color: '#7F8C8D', marginVertical: 20 },
   itemEquipe: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#ECF0F1' },
   nomeEquipe: { fontSize: 16, color: '#34495E', fontWeight: 'bold' },
+  itemPendente: { flexDirection: 'row', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#D5DBDB', borderRadius: 8, padding: 12, marginBottom: 10, alignItems: 'center' },
+  itemInfo: { flex: 1 },
+  itemColab: { fontSize: 16, fontWeight: 'bold', color: '#2C3E50' },
+  itemDetalhes: { fontSize: 13, color: '#7F8C8D', marginTop: 2 },
+  itemAcoes: { flexDirection: 'row', gap: 10 },
+  btnApagarPendente: { backgroundColor: '#E74C3C', padding: 10, borderRadius: 8 },
+  btnAcaoTexto: { fontSize: 16 },
   btnFecharModal: { backgroundColor: '#95A5A6', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 15 },
-  btnFecharTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-  btnAtualizar: { backgroundColor: '#E67E22', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginTop: 10 },
-  btnAtualizarText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }
+  btnFecharTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 14 }
 });

@@ -246,7 +246,7 @@ export default function EstatisticasScreen() {
             .card-tambor { background-color: #FEF5E7; color: #D35400; border: 1px solid #F39C12; }
             .card-estria { background-color: #F4ECF7; color: #8E44AD; border: 1px solid #9B59B6; }
             table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 30px; }
-            th, td { border: 1px solid #BDC3C7; padding: 8px; text-align: center; }
+            th, td { border: 1px solid #BDC3C7; padding: 10px; text-align: center; }
             th { background-color: #ECF0F1; color: #2C3E50; }
             h3 { color: #34495E; margin-bottom: 5px; }
           </style>
@@ -315,7 +315,7 @@ export default function EstatisticasScreen() {
             </View>
             <View style={styles.boxPicker}><Picker selectedValue={anoInic} onValueChange={handleChangeAnoInic} style={styles.picker}><Picker.Item label="2025" value={2025} /><Picker.Item label="2026" value={2026} /></Picker></View>
           </View>
-          <Text style={[styles.secaoTitle, {marginTop: 5}]}>Até:</Text>
+          <Text style={[styles.secaoTitle, {marginTop: 10}]}>Até:</Text>
           <View style={styles.row}>
             <View style={styles.boxPicker}><Picker selectedValue={diaFim} onValueChange={setDiaFim} style={styles.picker}>{Array.from({length: 31}, (_, i) => <Picker.Item key={i} label={`${i+1}`} value={i+1} />)}</Picker></View>
             <View style={styles.boxPicker}>
@@ -326,7 +326,7 @@ export default function EstatisticasScreen() {
             <View style={styles.boxPicker}><Picker selectedValue={anoFim} onValueChange={setAnoFim} style={styles.picker}><Picker.Item label="2025" value={2025} /><Picker.Item label="2026" value={2026} /></Picker></View>
           </View>
 
-          <Text style={[styles.secaoTitle, {marginTop: 15, borderTopWidth: 1, borderTopColor: '#ECF0F1', paddingTop: 10}]}>Filtros Avançados:</Text>
+          <Text style={[styles.secaoTitle, {marginTop: 20, borderTopWidth: 1, borderTopColor: '#ECF0F1', paddingTop: 10}]}>Filtros Avançados:</Text>
           
           <View style={styles.row}>
             <View style={styles.boxPicker}>
