@@ -7,7 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../../src/supabase';
 
 export default function DrawerLayout() {
-  // 👉 NOVO: Pega a largura da tela para a inteligência de responsividade
+  // 👉 Pega a largura da tela para a inteligência de responsividade
   const { width } = useWindowDimensions();
   const isTelaGrande = width >= 768;
 
@@ -34,27 +34,42 @@ export default function DrawerLayout() {
       setIsAdmin(ehAdmin);
 
       if (!ehAdmin && cargoDoUsuario) {
-        // 👉 BUSCA BLINDADA: Trazemos todas as regras e filtramos no JavaScript para não bugar o banco
+        // 👉 NOVO 1: Primeiro, tenta carregar as permissões que estão salvas no cache offline do tablet
+        const permissoesOfflineSalvas = await AsyncStorage.getItem('@permissoes_menu_offline');
+        if (permissoesOfflineSalvas) {
+          setPermissoesAtivas(JSON.parse(permissoesOfflineSalvas));
+        }
+
+        // 👉 BUSCA BLINDADA: Tenta atualizar com os dados mais recentes do banco (se tiver internet)
         const { data, error } = await supabase.from('permissoes_menu').select('*');
         
-        if (data) {
-          // Procura o cargo ignorando maiúsculas e minúsculas
+        // Se conseguiu baixar do banco (tem internet)
+        if (data && !error) {
           const regraDoCargo = data.find(item => item.cargo && item.cargo.toLowerCase() === cargoDoUsuario.toLowerCase());
           
           if (regraDoCargo && regraDoCargo.telas) {
             const regras = typeof regraDoCargo.telas === 'string' ? JSON.parse(regraDoCargo.telas) : regraDoCargo.telas;
+            
+            // Atualiza o menu com os dados frescos da internet
             setPermissoesAtivas(regras);
-          } else {
-            // 👉 O DEDO-DURO: Se chegar aqui, o cargo dele não existe na tabela de permissões!
+            
+            // 👉 NOVO 2: Salva (atualiza) essas permissões na memória do tablet para o próximo uso offline
+            await AsyncStorage.setItem('@permissoes_menu_offline', JSON.stringify(regras));
+            
+          } else if (!permissoesOfflineSalvas) {
+            // 👉 O DEDO-DURO: Só avisa se não achar no banco E não tiver nada no cache offline
             Alert.alert(
               "Aviso de Acesso", 
               `Nenhuma regra de menu encontrada para o seu cargo: "${cargoDoUsuario}". \nPeça ao Administrador para configurar no Painel.`
             );
           }
+        } else if (error && !permissoesOfflineSalvas) {
+          // Se deu erro (sem internet) e também não tem cache offline salvo
+          console.log("Dispositivo offline e sem permissões salvas na memória.");
         }
       }
     } catch (e) {
-      console.log("Erro ao carregar regras de acesso do menu");
+      console.log("Erro ao carregar regras de acesso do menu", e);
     } finally {
       setCarregandoMenu(false);
     }
@@ -83,7 +98,6 @@ export default function DrawerLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Drawer
         screenOptions={{
-          // 👉 NOVA REGRA: Fixo na Web (permanent), esconde no celular (front)
           drawerType: isTelaGrande ? 'permanent' : 'front',
           drawerStyle: {
             width: isTelaGrande ? 280 : 250,
@@ -108,16 +122,6 @@ export default function DrawerLayout() {
             drawerLabel: 'Lançar Produção',
             title: 'Início',
             drawerIcon: ({ color, size }) => <Ionicons name="leaf" size={size} color={color} />,
-          }}
-        />
-
-        <Drawer.Screen
-          name="diarios"
-          options={{
-            drawerLabel: 'Diário Reserva',
-            title: 'Diário',
-            drawerIcon: ({ color, size }) => <MaterialCommunityIcons name="book-open-page-variant" size={size} color={color} />,
-            drawerItemStyle: ocultarVisul('cadastros')
           }}
         />
 

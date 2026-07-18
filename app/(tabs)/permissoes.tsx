@@ -22,7 +22,6 @@ export default function PermissoesScreen() {
     { chave: 'cadastros', nome: '📝 Cadastros' },
     { chave: 'relatorios', nome: '📄 Relatórios' },
     { chave: 'colaboradores', nome: '🤝 Colaboradores' },
-    { chave: 'diarios', nome: '📖 Diário Reserva' },
     { chave: 'retroativo', nome: '⏳ Lançamento Retroativo' },
     { chave: 'carregamentos', nome: '🚛 Expedição / Romaneio' }
   ];
