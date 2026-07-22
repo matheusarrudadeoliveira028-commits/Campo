@@ -235,40 +235,72 @@ export default function CadastrosScreen() {
     }
   };
 
+  // =========================================================================
+  // 🟢 FUNÇÃO SALVAR MAPA ATUALIZADA (O RAIO-X) 🟢
+  // =========================================================================
   const salvarMapa = async () => {
-    const fazendaFinal = nomeFazendaSelecionada === 'NOVA_FAZENDA' ? nomeFazendaDigitada.trim() : nomeFazendaSelecionada;
+    try {
+      const fazendaFinal = nomeFazendaSelecionada === 'NOVA_FAZENDA' ? nomeFazendaDigitada.trim() : nomeFazendaSelecionada;
 
-    if (!fazendaFinal || !numeroQuadra || !numeroRamal || !totalPes) {
-      return alertaWebMobile('Erro', 'Preencha todos os campos obrigatórios do mapa (Fazenda, Quadra, Ramal e Limite de Pés)!');
-    }
-    
-    setSalvando(true);
-    
-    const payload = { 
-      fazenda: fazendaFinal.toUpperCase(), 
-      quadra: numeroQuadra.trim(), 
-      ramal: numeroRamal.trim(), 
-      total_pes: parseInt(totalPes),
-      servico_permitido: servicoVinculado 
-    };
+      if (!fazendaFinal || !numeroQuadra || !numeroRamal || !totalPes) {
+        return alertaWebMobile('Erro', 'Preencha Fazenda, Quadra, Ramal e Limite de Pés!');
+      }
+      
+      // Limpa pontos ou vírgulas se o usuário digitar errado (Ex: 1.500 vira 1500)
+      const pesFormatado = parseInt(totalPes.toString().replace(/\D/g, '')) || 0;
+      
+      setSalvando(true);
+      
+      const payload = { 
+        fazenda: fazendaFinal.toUpperCase(), 
+        quadra: numeroQuadra.trim().toUpperCase(), 
+        ramal: numeroRamal.trim(), 
+        total_pes: pesFormatado,
+        servico_permitido: servicoVinculado === '' ? null : servicoVinculado 
+      };
 
-    let error;
+      let response;
 
-    if (editandoMapaId) {
-      const { error: errUpdate } = await supabase.from('mapa_fazendas').update(payload).eq('id', editandoMapaId);
-      error = errUpdate;
-    } else {
-      const { error: errInsert } = await supabase.from('mapa_fazendas').insert([payload]);
-      error = errInsert;
-    }
+      // O comando .select() no final OBRIGA o Supabase a devolver os dados gravados
+      if (editandoMapaId) {
+        response = await supabase
+          .from('mapa_fazendas')
+          .update(payload)
+          .eq('id', editandoMapaId)
+          .select();
+      } else {
+        response = await supabase
+          .from('mapa_fazendas')
+          .insert([payload])
+          .select();
+      }
 
-    setSalvando(false);
-    
-    if (error) alertaWebMobile('Erro', error.message);
-    else {
-      alertaWebMobile('Sucesso', editandoMapaId ? 'Ramal atualizado!' : 'Ramal cadastrado!');
+      const { data, error, status } = response;
+      setSalvando(false);
+
+      if (error) {
+        return alertaWebMobile('Erro Rejeitado pelo Banco', `Motivo: ${error.message}`);
+      }
+
+      if (!data || data.length === 0) {
+        return alertaWebMobile('Erro Fantasma', `O banco respondeu com Status ${status}, mas salvou 0 linhas! Verifique se os nomes das colunas estão EXATAMENTE iguais no Supabase.`);
+      }
+
+      alertaWebMobile('Sucesso!', `Tudo certo! Status: ${status}.\nO banco confirmou a gravação de ${data.length} linha(s).`);
+
+      // 1. Limpa os campos de edição
       cancelarEdicaoMapa();
-      carregarMapas();
+      
+      // 2. Espera puxar os dados mais atualizados do banco
+      await carregarMapas();
+      
+      // 3. Força os filtros da tela a procurarem pelo nome MAIÚSCULO correto para o item não sumir
+      setFiltroFazenda(payload.fazenda);
+      setFiltroQuadra(payload.quadra);
+
+    } catch (err: any) {
+      setSalvando(false);
+      alertaWebMobile('Erro Crítico no App', err.message);
     }
   };
 

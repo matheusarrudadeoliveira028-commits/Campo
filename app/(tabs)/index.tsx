@@ -157,7 +157,6 @@ export default function HomeScreen() {
     try {
       let { data: colabs, error: errColab } = await supabase.from('colaboradores').select('*').order('nome');
       const { data: servs, error: errServ } = await supabase.from('servicos').select('*').neq('bloqueado', true).order('nome');
-      // 👉 BUSCA OTIMIZADA APLICADA AQUI PARA NÃO ESTOURAR A MEMÓRIA!
       const { data: mapa, error: errMapa } = await supabase.from('mapa_fazendas').select('fazenda, quadra, ramal, total_pes, data_bloqueio');
       const { data: config, error: errConfig } = await supabase.from('configuracoes').select('*').single();
 
@@ -227,8 +226,25 @@ export default function HomeScreen() {
       setRamaisSelecionados([]); setLimitePes(null);
     }
     if (quadra) {
-      const ramaisDessaQuadra = mapaCompleto.filter(m => m.fazenda === fazenda && m.quadra === quadra);
-      ramaisDessaQuadra.sort((a, b) => parseInt(a.ramal) - parseInt(b.ramal));
+      const ramaisBrutos = mapaCompleto.filter(m => m.fazenda === fazenda && m.quadra === quadra);
+      
+      const ramaisAgrupados: Record<string, any> = {};
+      
+      ramaisBrutos.forEach(r => {
+        const numRamal = String(r.ramal).trim().toUpperCase(); 
+        if (!ramaisAgrupados[numRamal]) {
+          ramaisAgrupados[numRamal] = { ...r, ramal: numRamal, total_pes: 0 };
+        }
+        ramaisAgrupados[numRamal].total_pes += (r.total_pes || 0);
+        
+        if (r.data_bloqueio) {
+          ramaisAgrupados[numRamal].data_bloqueio = r.data_bloqueio;
+        }
+      });
+
+      const ramaisDessaQuadra = Object.values(ramaisAgrupados);
+      ramaisDessaQuadra.sort((a: any, b: any) => String(a.ramal).localeCompare(String(b.ramal), undefined, { numeric: true }));
+      
       setRamaisDisponiveis(ramaisDessaQuadra);
     } else {
       setRamaisDisponiveis([]);
@@ -239,7 +255,7 @@ export default function HomeScreen() {
     if (ramaisSelecionados.length === 1) {
       const ramalSelecionado = ramaisDisponiveis.find(r => String(r.ramal) === ramaisSelecionados[0]);
       if (ramalSelecionado && ramalSelecionado.total_pes) {
-        setLimitePes(ramalSelecionado.total_pes);
+        setLimitePes(ramalSelecionado.total_pes); 
       } else {
         setLimitePes(null);
       }
@@ -250,7 +266,6 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (servicoSelecionadoCompleto && quantidade) {
-      // 🟢 USANDO FUNÇÃO DE CONVERSÃO BLINDADA
       const qtdNum = converterParaNumero(quantidade);
       let valorUnitario = servicoSelecionadoCompleto.preco_base || 0;
       if (servicoSelecionadoCompleto.tipo_cobranca === 'milheiro') valorUnitario = valorUnitario / 1000;
@@ -279,7 +294,6 @@ export default function HomeScreen() {
   };
 
   const handleMudancaQuantidade = (texto: string) => {
-    // 🟢 USANDO FUNÇÃO DE CONVERSÃO BLINDADA
     const valorDigitado = converterParaNumero(texto);
     
     if (!permiteMultiplosRamais && limitePes !== null && valorDigitado > limitePes) {
@@ -362,7 +376,11 @@ export default function HomeScreen() {
     }
 
     for (let r of ramaisSelecionados) {
-      const ramalInfo = mapaCompleto.find(m => m.fazenda === fazenda && m.quadra === quadra && String(m.ramal) === r);
+      const ramalInfo = mapaCompleto.find(m => 
+        m.fazenda === fazenda && 
+        m.quadra === quadra && 
+        String(m.ramal).trim().toUpperCase() === String(r).trim().toUpperCase()
+      );
       if (!ramalInfo) {
         return Alert.alert("❌ Erro", `O ramal ${r} não foi encontrado no mapa desta fazenda e quadra.`);
       }
@@ -374,7 +392,6 @@ export default function HomeScreen() {
       }
     }
 
-    // 🟢 USANDO FUNÇÃO DE CONVERSÃO BLINDADA NA CHECAGEM DE LIMITE
     if (!permiteMultiplosRamais && limitePes !== null && converterParaNumero(quantidade) > limitePes) {
         setQuantidade('');
         return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
@@ -394,7 +411,6 @@ export default function HomeScreen() {
         fazenda, 
         quadra, 
         ramal: numRamalFinal, 
-        // 🟢 USANDO FUNÇÃO DE CONVERSÃO BLINDADA NO SALVAMENTO
         quantidade: converterParaNumero(quantidade), 
         valor_unitario: valorUnitario, 
         valor_total: valorTotalCalculado, 
@@ -509,7 +525,7 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.header}>
-            <Text style={styles.title}>Resinas Abud</Text>
+            <Text style={styles.title}>Production System</Text>
             <Text style={styles.subtitle}>Lançamento de Produção</Text>
             <Relogio onAtualizar={atualizarMochilaManual} />
           </View>
@@ -630,6 +646,18 @@ export default function HomeScreen() {
                   onChangeText={handleMudancaQuantidade} 
                   editable={ramaisSelecionados.length > 0} 
                 />
+
+                {/* 🟢 NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO DO VALOR CHEIO */}
+                {limitePes !== null && (
+                  <TouchableOpacity 
+                    style={styles.btnAutoPreencher} 
+                    onPress={() => handleMudancaQuantidade(String(limitePes))}
+                  >
+                    <Text style={styles.btnAutoPreencherTexto}>
+                      📌 Valor Cheio do Ramal: {limitePes.toLocaleString('pt-BR')} pés (Tocar para preencher)
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
                 {valorTotalCalculado > 0 && (
                   <View style={styles.cardGanho}>
@@ -764,6 +792,10 @@ const styles = StyleSheet.create({
   
   inputQuantidade: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
   disabledInput: { backgroundColor: '#EAECEE' },
+  
+  // 🟢 ESTILO NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO 
+  btnAutoPreencher: { backgroundColor: '#E8F8F5', padding: 12, borderRadius: 8, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#27AE60', borderStyle: 'dashed' },
+  btnAutoPreencherTexto: { color: '#27AE60', fontWeight: 'bold', fontSize: 13 },
   
   row: { flexDirection: 'row' },
   col: { flex: 1, marginHorizontal: 5 },
