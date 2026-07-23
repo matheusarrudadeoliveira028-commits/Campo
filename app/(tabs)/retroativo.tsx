@@ -6,6 +6,14 @@ import React, { memo, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, InteractionManager, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
+// 🟢 FUNÇÃO BLINDADA: Evita tela branca (crash) convertendo de forma segura qualquer tipo de dado
+const converterParaNumero = (valor: any): number => {
+  if (valor === null || valor === undefined || valor === '') return 0;
+  const valorFormatado = String(valor).replace(',', '.');
+  const numeroParsed = parseFloat(valorFormatado);
+  return isNaN(numeroParsed) ? 0 : numeroParsed;
+};
+
 // =========================================================================
 // COMPONENTE ISOLADO DE RELÓGIO
 // =========================================================================
@@ -129,17 +137,26 @@ export default function RetroativoScreen() {
     try {
       const { data: colabs, error: errColab } = await supabase.from('colaboradores').select('*').order('nome');
       const { data: servs, error: errServ } = await supabase.from('servicos').select('*').neq('bloqueado', true).order('nome');
-      
-      // 👉 MELHORIA 2: BUSCA OTIMIZADA PARA NÃO ESTOURAR A MEMÓRIA
       const { data: mapa, error: errMapa } = await supabase.from('mapa_fazendas').select('fazenda, quadra, ramal, total_pes, data_bloqueio');
 
       if (errColab || errServ || errMapa) throw new Error("Sem rede");
 
-      if (colabs) { setListaColaboradores(colabs); await AsyncStorage.setItem('@mochila_colaboradores', JSON.stringify(colabs)); }
-      if (servs) { setListaServicos(servs); await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs)); }
+      if (colabs) { 
+        setListaColaboradores(colabs); 
+        await AsyncStorage.setItem('@mochila_colaboradores', JSON.stringify(colabs)); 
+      }
+      if (servs) { 
+        setListaServicos(servs); 
+        await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs)); 
+      }
       if (mapa) {
         setMapaCompleto(mapa);
-        setFazendasDisponiveis([...new Set(mapa.map(item => item.fazenda))] as string[]);
+        
+        // 🟢 ORDENAÇÃO DE FAZENDAS
+        const fazendasUnicas = [...new Set(mapa.map(item => item.fazenda))] as string[];
+        fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        setFazendasDisponiveis(fazendasUnicas);
+        
         await AsyncStorage.setItem('@mochila_mapa', JSON.stringify(mapa));
       }
       setIsOffline(false);
@@ -154,7 +171,10 @@ export default function RetroativoScreen() {
       if (mochilaMapa) {
         const mapaParsed = JSON.parse(mochilaMapa);
         setMapaCompleto(mapaParsed);
-        setFazendasDisponiveis([...new Set(mapaParsed.map((item: any) => item.fazenda))] as string[]);
+        
+        const fazendasUnicas = [...new Set(mapaParsed.map((item: any) => item.fazenda))] as string[];
+        fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        setFazendasDisponiveis(fazendasUnicas);
       }
     }
     setCarregandoDados(false);
@@ -162,21 +182,45 @@ export default function RetroativoScreen() {
 
   const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados..."); };
 
+  // 🟢 ORDENAÇÃO DE QUADRAS
   useEffect(() => {
     if (indexEdicao === null) {
       setQuadra(''); setRamaisSelecionados([]); setLimitePes(null);
     }
-    if (fazenda) setQuadrasDisponiveis([...new Set(mapaCompleto.filter(m => m.fazenda === fazenda).map(m => m.quadra))] as string[]);
-    else setQuadrasDisponiveis([]);
+    if (fazenda) {
+      const quadrasFiltradas = [...new Set(mapaCompleto.filter(m => m.fazenda === fazenda).map(m => String(m.quadra)))];
+      quadrasFiltradas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      setQuadrasDisponiveis(quadrasFiltradas);
+    } else {
+      setQuadrasDisponiveis([]);
+    }
   }, [fazenda, mapaCompleto]);
 
+  // 🟢 AGRUPAMENTO E ORDENAÇÃO DE RAMAIS
   useEffect(() => {
     if (indexEdicao === null) {
       setRamaisSelecionados([]); setLimitePes(null);
     }
     if (quadra) {
-      const ramaisDessaQuadra = mapaCompleto.filter(m => m.fazenda === fazenda && m.quadra === quadra);
-      ramaisDessaQuadra.sort((a, b) => parseInt(a.ramal) - parseInt(b.ramal));
+      const ramaisBrutos = mapaCompleto.filter(m => m.fazenda === fazenda && m.quadra === quadra);
+      
+      const ramaisAgrupados: Record<string, any> = {};
+      
+      ramaisBrutos.forEach(r => {
+        const numRamal = String(r.ramal).trim().toUpperCase(); 
+        if (!ramaisAgrupados[numRamal]) {
+          ramaisAgrupados[numRamal] = { ...r, ramal: numRamal, total_pes: 0 };
+        }
+        ramaisAgrupados[numRamal].total_pes += (r.total_pes || 0);
+        
+        if (r.data_bloqueio) {
+          ramaisAgrupados[numRamal].data_bloqueio = r.data_bloqueio;
+        }
+      });
+
+      const ramaisDessaQuadra = Object.values(ramaisAgrupados);
+      ramaisDessaQuadra.sort((a: any, b: any) => String(a.ramal).localeCompare(String(b.ramal), undefined, { numeric: true }));
+      
       setRamaisDisponiveis(ramaisDessaQuadra);
     } else {
       setRamaisDisponiveis([]);
@@ -198,7 +242,7 @@ export default function RetroativoScreen() {
 
   useEffect(() => {
     if (servicoSelecionadoCompleto && quantidade) {
-      const qtdNum = parseInt(quantidade) || 0;
+      const qtdNum = converterParaNumero(quantidade);
       let valorUnitario = servicoSelecionadoCompleto.preco_base || 0;
       if (servicoSelecionadoCompleto.tipo_cobranca === 'milheiro') valorUnitario = valorUnitario / 1000;
       setValorTotalCalculado(qtdNum * valorUnitario);
@@ -207,7 +251,6 @@ export default function RetroativoScreen() {
 
   const isColeta = servicoSelecionadoCompleto?.nome?.toLowerCase().includes('coleta');
   
-  // 👉 MELHORIA 3: LÓGICA DE MÚLTIPLOS RAMAIS INVISÍVEL (OBEDECE AO ADMIN)
   const permiteMultiplosRamais = servicoSelecionadoCompleto?.permite_multiplos === true || isColeta;
 
   const toggleRamal = (ramalStr: string) => {
@@ -226,9 +269,9 @@ export default function RetroativoScreen() {
     setRamaisSelecionados(ramaisDisponiveis.map(r => String(r.ramal)));
   };
 
-  // 👉 LÓGICA DE ALERTAS E TRAVA
+  // 👉 LÓGICA DE ALERTAS E TRAVA COM CORREÇÃO DE DECIMAIS
   const handleMudancaQuantidade = (texto: string) => {
-    const valorDigitado = parseInt(texto) || 0;
+    const valorDigitado = converterParaNumero(texto);
     
     if (!permiteMultiplosRamais && limitePes !== null && valorDigitado > limitePes) {
       if (!isOffline) {
@@ -329,7 +372,7 @@ export default function RetroativoScreen() {
     const dataIsoFinal = `${hojeISO}T${horaRetroativa}:00.000Z`;
 
     for (let r of ramaisSelecionados) {
-      const ramalInfo = mapaCompleto.find(m => m.fazenda === fazenda && m.quadra === quadra && String(m.ramal) === r);
+      const ramalInfo = mapaCompleto.find(m => m.fazenda === fazenda && m.quadra === quadra && String(m.ramal).trim().toUpperCase() === String(r).trim().toUpperCase());
       if (!ramalInfo) {
         return Alert.alert("❌ Erro", `O ramal ${r} não foi encontrado no mapa desta fazenda e quadra.`);
       }
@@ -338,7 +381,7 @@ export default function RetroativoScreen() {
       }
     }
 
-    if (!permiteMultiplosRamais && limitePes !== null && parseInt(quantidade) > limitePes) {
+    if (!permiteMultiplosRamais && limitePes !== null && converterParaNumero(quantidade) > limitePes) {
         setQuantidade('');
         return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
     }
@@ -357,7 +400,7 @@ export default function RetroativoScreen() {
         fazenda, 
         quadra, 
         ramal: numRamalFinal, 
-        quantidade: parseInt(quantidade), 
+        quantidade: converterParaNumero(quantidade), 
         valor_unitario: valorUnitario, 
         valor_total: valorTotalCalculado, 
         data: dataIsoFinal, 
@@ -611,6 +654,18 @@ export default function RetroativoScreen() {
                   editable={ramaisSelecionados.length > 0} 
                 />
 
+                {/* 🟢 NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO DO VALOR CHEIO */}
+                {limitePes !== null && (
+                  <TouchableOpacity 
+                    style={styles.btnAutoPreencher} 
+                    onPress={() => handleMudancaQuantidade(String(limitePes))}
+                  >
+                    <Text style={styles.btnAutoPreencherTexto}>
+                      📌 Valor Cheio do Ramal: {limitePes.toLocaleString('pt-BR')} pés (Tocar para preencher)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
                 {valorTotalCalculado > 0 && (
                   <View style={styles.cardGanho}>
                     <Text style={styles.textoGanho}>Valor deste lançamento:</Text>
@@ -773,11 +828,13 @@ const styles = StyleSheet.create({
   inputQuantidade: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
   disabledInput: { backgroundColor: '#EAECEE' },
   
-  // 👉 NOVO: Estilo específico para Data e Hora ficarem lado a lado sem quebrar
+  // 🟢 ESTILO NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO 
+  btnAutoPreencher: { backgroundColor: '#E8F8F5', padding: 12, borderRadius: 8, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#27AE60', borderStyle: 'dashed' },
+  btnAutoPreencherTexto: { color: '#27AE60', fontWeight: 'bold', fontSize: 13 },
+  
   rowData: { flexDirection: 'row', justifyContent: 'space-between' },
   colData: { width: '48%' },
 
-  // 👉 LAYOUT EM COLUNA PARA FAZENDA E QUADRA NÃO CORTAREM O TEXTO
   row: { flexDirection: 'column' },
   col: { width: '100%', marginBottom: 10 },
   

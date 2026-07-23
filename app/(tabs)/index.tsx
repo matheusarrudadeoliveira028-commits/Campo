@@ -169,19 +169,18 @@ export default function HomeScreen() {
       }
 
       if (colabs) {
-        if (perfilLido && perfilLido.cargo !== 'Administrador') {
-          colabs = colabs.filter(c => 
-            c.fiscal_vinculado === perfilLido.nome || 
-            c.fiscal_id === perfilLido.id
-          );
-        }
         setListaColaboradores(colabs); 
         await AsyncStorage.setItem('@mochila_colaboradores', JSON.stringify(colabs)); 
       }
       if (servs) { setListaServicos(servs); await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs)); }
       if (mapa) {
         setMapaCompleto(mapa);
-        setFazendasDisponiveis([...new Set(mapa.map(item => item.fazenda))] as string[]);
+        
+        // Ordena as fazendas disponíveis
+        const fazendasUnicas = [...new Set(mapa.map(item => item.fazenda))] as string[];
+        fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        setFazendasDisponiveis(fazendasUnicas);
+        
         await AsyncStorage.setItem('@mochila_mapa', JSON.stringify(mapa));
       }
       setIsOffline(false);
@@ -205,7 +204,10 @@ export default function HomeScreen() {
       if (mochilaMapa) {
         const mapaParsed = JSON.parse(mochilaMapa);
         setMapaCompleto(mapaParsed);
-        setFazendasDisponiveis([...new Set(mapaParsed.map((item: any) => item.fazenda))] as string[]);
+        
+        const fazendasUnicas = [...new Set(mapaParsed.map((item: any) => item.fazenda))] as string[];
+        fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        setFazendasDisponiveis(fazendasUnicas);
       }
     }
     setCarregandoDados(false);
@@ -213,12 +215,18 @@ export default function HomeScreen() {
 
   const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados..."); };
 
+  // 🟢 ORDENAÇÃO INTELIGENTE DAS QUADRAS APLICADA AQUI
   useEffect(() => {
     if (indexEdicao === null) {
       setQuadra(''); setRamaisSelecionados([]); setLimitePes(null);
     }
-    if (fazenda) setQuadrasDisponiveis([...new Set(mapaCompleto.filter(m => m.fazenda === fazenda).map(m => m.quadra))] as string[]);
-    else setQuadrasDisponiveis([]);
+    if (fazenda) {
+      const quadrasFiltradas = [...new Set(mapaCompleto.filter(m => m.fazenda === fazenda).map(m => String(m.quadra)))];
+      quadrasFiltradas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      setQuadrasDisponiveis(quadrasFiltradas);
+    } else {
+      setQuadrasDisponiveis([]);
+    }
   }, [fazenda, mapaCompleto]);
 
   useEffect(() => {
@@ -555,7 +563,7 @@ export default function HomeScreen() {
                   </View>
                 )}
 
-                <Text style={styles.label}>Colaborador da sua Equipe:</Text>
+                <Text style={styles.label}>Colaborador:</Text>
                 <View style={styles.pickerContainer}>
                   <Picker selectedValue={colaborador} onValueChange={setColaborador} style={styles.picker}>
                     <Picker.Item label="Selecione o Colaborador..." value="" />

@@ -131,7 +131,7 @@ export default function DrawerLayout() {
             drawerLabel: 'Lançamento Retroativo',
             title: 'Exceções',
             drawerIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />,
-            drawerItemStyle: ocultarVisul('cadastros')
+            drawerItemStyle: ocultarVisul('retroativo')
           }}
         />
 
@@ -175,13 +175,14 @@ export default function DrawerLayout() {
           }}
         />
 
+        {/* 🟢 TELA ACOMPANHAMENTO ADICIONADA AQUI */}
         <Drawer.Screen
-          name="estatisticas"
+          name="AcompanhamentoScreen"
           options={{
-            drawerLabel: 'Estatísticas De Produção',
-            title: 'Dashboard',
-            drawerIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} />,
-            drawerItemStyle: ocultarVisul('estatisticas')
+            drawerLabel: 'Acompanhamento',
+            title: 'Acompanhamento',
+            drawerIcon: ({ color, size }) => <Ionicons name="trending-up" size={size} color={color} />,
+            drawerItemStyle: ocultarVisul('acompanhamento')
           }}
         />
 
@@ -241,7 +242,7 @@ export default function DrawerLayout() {
             drawerLabel: 'Expedição / Romaneio',
             title: 'Carregamentos',
             drawerIcon: ({ color, size }) => <MaterialCommunityIcons name="truck" size={size} color={color} />,
-            drawerItemStyle: ocultarVisul('relatorios')
+            drawerItemStyle: ocultarVisul('carregamentos')
           }}
         />
 

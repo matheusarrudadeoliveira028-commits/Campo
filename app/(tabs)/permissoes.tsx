@@ -14,7 +14,6 @@ export default function PermissoesScreen() {
     { chave: 'mapa', nome: '🗺️ Mapa Da Fazenda' },
     { chave: 'fechamento', nome: '💰 Fechamento Financeiro' },
     { chave: 'usuarios', nome: '👥 Gestão De Acessos' },
-    { chave: 'estatisticas', nome: '📊 Estatísticas De Produção' },
     { chave: 'ferias', nome: '🏖️ Férias' },
     { chave: 'equipes', nome: '👷 Equipes' },
     { chave: 'suporte', nome: '🎧 Suporte Brekaz' },
@@ -22,6 +21,7 @@ export default function PermissoesScreen() {
     { chave: 'cadastros', nome: '📝 Cadastros' },
     { chave: 'relatorios', nome: '📄 Relatórios' },
     { chave: 'colaboradores', nome: '🤝 Colaboradores' },
+    { chave: 'AcomapnhamentoScreen', nome: '📄 Acompanhamento Diário' },
     { chave: 'retroativo', nome: '⏳ Lançamento Retroativo' },
     { chave: 'carregamentos', nome: '🚛 Expedição / Romaneio' }
   ];

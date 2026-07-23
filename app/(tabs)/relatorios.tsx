@@ -266,22 +266,51 @@ export default function RelatoriosScreen() {
           const registrosDoDia = folha.registros.filter((r: any) => r.data.startsWith(isoDate));
 
           if (registrosDoDia.length > 0) {
-            registrosDoDia.forEach((item: any) => {
+            
+            // 🟢 LÓGICA DE AGRUPAMENTO DE RAMAIS INJETADA AQUI 🟢
+            const registrosAgrupados = registrosDoDia.reduce((acc: any, item: any) => {
+              const chave = `${item.servico}_${item.fazenda}_${item.quadra}_${item.valor_unitario}`;
+              
+              if (!acc[chave]) {
+                acc[chave] = {
+                  ...item,
+                  quantidade: Number(item.quantidade) || 0,
+                  valor_total: Number(item.valor_total) || 0,
+                  ramais: item.ramal ? [String(item.ramal)] : []
+                };
+              } else {
+                acc[chave].quantidade += Number(item.quantidade) || 0;
+                acc[chave].valor_total += Number(item.valor_total) || 0;
+                if (item.ramal) {
+                  acc[chave].ramais.push(String(item.ramal));
+                }
+              }
+              return acc;
+            }, {});
+
+            Object.values(registrosAgrupados).forEach((item: any) => {
+              // Remove ramais duplicados e formata com vírgula
+              const ramaisUnicos = [...new Set(item.ramais)];
+              const ramaisStr = ramaisUnicos.join(', ') || '-'; 
+              
               const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
               const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
+              
               linhasTabela += `
                 <tr>
                   <td>${diaMesStr}</td>
                   <td>${item.servico || '-'}</td>
                   <td>${item.fazenda || '-'}</td>
                   <td>${item.quadra || '-'}</td>
-                  <td>${item.ramal || '-'}</td>
+                  <td>${ramaisStr}</td>
                   <td>${item.quantidade || '-'}</td>
                   <td>${valorUni}</td>
                   <td>R$ ${valorTot}</td>
                 </tr>
               `;
             });
+            // 🟢 FIM DA LÓGICA DE AGRUPAMENTO 🟢
+
           } else {
             const isFeriadoManual = arrayFeriadosManuais.includes(diaMesStr);
             const isFeriadoNacional = listaFeriadosNacionais.includes(isoDate);
@@ -345,6 +374,12 @@ export default function RelatoriosScreen() {
               </thead>
               <tbody>
                 ${linhasTabela}
+                <!-- 🟢 ADICIONADO A LINHA DE QUANTIDADE TOTAL -->
+                <tr>
+                  <td colspan="5" style="text-align: right; font-weight: bold; background-color: #E8E8E8;">QUANTIDADE TOTAL:</td>
+                  <td style="font-weight: bold; background-color: #E8E8E8; font-size: 13px;">${totalQuantidade}</td>
+                  <td colspan="2" style="background-color: #E8E8E8;"></td>
+                </tr>
               </tbody>
             </table>
 
