@@ -182,7 +182,7 @@ export default function DrawerLayout() {
             drawerLabel: 'Acompanhamento',
             title: 'Acompanhamento',
             drawerIcon: ({ color, size }) => <Ionicons name="trending-up" size={size} color={color} />,
-            drawerItemStyle: ocultarVisul('acompanhamento')
+            drawerItemStyle: ocultarVisul('AcompanhamentoScreen') // ✅ Exatamente igual à chave das permissões
           }}
         />
 

@@ -215,7 +215,6 @@ export default function HomeScreen() {
 
   const atualizarMochilaManual = () => { carregarUsuarioLogado(); Alert.alert("Atualizando", "Buscando dados..."); };
 
-  // 🟢 ORDENAÇÃO INTELIGENTE DAS QUADRAS APLICADA AQUI
   useEffect(() => {
     if (indexEdicao === null) {
       setQuadra(''); setRamaisSelecionados([]); setLimitePes(null);
@@ -400,9 +399,16 @@ export default function HomeScreen() {
       }
     }
 
-    if (!permiteMultiplosRamais && limitePes !== null && converterParaNumero(quantidade) > limitePes) {
-        setQuantidade('');
-        return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
+    // 🟢 ATUALIZAÇÃO 1: Validação numérica inteligente e bloqueio de negativo/zero
+    const qtdNumerica = converterParaNumero(quantidade);
+
+    if (qtdNumerica <= 0) {
+      return Alert.alert("Aviso", "A quantidade deve ser maior que zero.");
+    }
+
+    if (!permiteMultiplosRamais && limitePes !== null && qtdNumerica > limitePes) {
+      setQuantidade('');
+      return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
     }
 
     setSalvando(true);
@@ -419,7 +425,7 @@ export default function HomeScreen() {
         fazenda, 
         quadra, 
         ramal: numRamalFinal, 
-        quantidade: converterParaNumero(quantidade), 
+        quantidade: qtdNumerica, 
         valor_unitario: valorUnitario, 
         valor_total: valorTotalCalculado, 
         data: dataOriginalEdicao ? dataOriginalEdicao : dataMomento.toISOString(),
@@ -453,31 +459,52 @@ export default function HomeScreen() {
     }
   };
 
+  // 🟢 ATUALIZAÇÃO 2: Sincronização Cirúrgica Protegida contra quedas parciais de rede
   const sincronizarComBanco = async () => {
     if (lancamentosPendentes.length === 0) return;
     setSincronizando(true);
 
     try {
-      const lancamentosProntosParaNuvem = lancamentosPendentes.map(item => {
-        const { foto_local, foto_url, ...dados } = item;
-        return dados;
-      });
+      let lancamentosRestantes = [...lancamentosPendentes];
+      let ocorreuErro = false;
+      let mensagemDeErro = '';
 
       const tamanhoLote = 50;
-      for (let i = 0; i < lancamentosProntosParaNuvem.length; i += tamanhoLote) {
-        const lote = lancamentosProntosParaNuvem.slice(i, i + tamanhoLote);
+      const arrayParaEnvio = [...lancamentosPendentes];
+
+      for (let i = 0; i < arrayParaEnvio.length; i += tamanhoLote) {
+        const loteBruto = arrayParaEnvio.slice(i, i + tamanhoLote);
         
-        const { error: dbError } = await supabase.from('diarios_campo').insert(lote);
-        if (dbError) throw new Error(`Falha no lote ${i}: ${dbError.message}`);
+        const loteLimpo = loteBruto.map(item => {
+          const { foto_local, foto_url, ...dados } = item;
+          return dados;
+        });
+
+        const { error: dbError } = await supabase.from('diarios_campo').insert(loteLimpo);
+        
+        if (dbError) {
+          ocorreuErro = true;
+          mensagemDeErro = dbError.message;
+          break; 
+        } else {
+          lancamentosRestantes = lancamentosRestantes.filter(item => !loteBruto.includes(item));
+          await AsyncStorage.setItem('@lancamentos_off', JSON.stringify(lancamentosRestantes));
+          setLancamentosPendentes(lancamentosRestantes);
+        }
       }
       
-      await AsyncStorage.removeItem('@lancamentos_off');
-      setLancamentosPendentes([]);
-      carregarDadosBase(perfilLogado, perfilLogado?.id || null);
-      Alert.alert("🚀 Sincronizado com Sucesso!", "Todas as produções foram enviadas.");
-      
+      if (!ocorreuErro) {
+        carregarDadosBase(perfilLogado, perfilLogado?.id || null);
+        Alert.alert("🚀 Sincronizado com Sucesso!", "Todas as produções foram enviadas.");
+      } else {
+        Alert.alert(
+          "⚠️ Sincronização Parcial", 
+          `A internet oscilou. Alguns registros foram salvos, mas faltam ${lancamentosRestantes.length}. Tente enviar o restante quando tiver sinal melhor.\n\nErro: ${mensagemDeErro}`
+        );
+      }
+
     } catch (e: any) {
-      Alert.alert("Erro na Sincronização", "A internet falhou no meio do envio. Tente novamente para enviar o restante: " + e.message);
+      Alert.alert("Erro de Conexão", "Não foi possível sincronizar no momento. Verifique sua internet.");
     } finally {
       setSincronizando(false);
     }
@@ -655,7 +682,6 @@ export default function HomeScreen() {
                   editable={ramaisSelecionados.length > 0} 
                 />
 
-                {/* 🟢 NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO DO VALOR CHEIO */}
                 {limitePes !== null && (
                   <TouchableOpacity 
                     style={styles.btnAutoPreencher} 

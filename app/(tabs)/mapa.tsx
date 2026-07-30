@@ -30,7 +30,7 @@ const QuadraHeader = memo(({ nome, total }: { nome: string, total: number }) => 
   </View>
 ));
 
-// 🟢 ITEM OTIMIZADO: Sem estilos inline (style={{...}}) para evitar recálculos do Garbage Collector
+// 🟢 ITEM OTIMIZADO: Sem estilos inline (style={{...}})
 const RamalItem = memo(({ r, podeEditar, aoTocar }: any) => {
   return (
     <TouchableOpacity
@@ -92,7 +92,7 @@ export default function MapaScreen() {
   const [listaPlanaParaUI, setListaPlanaParaUI] = useState<any[]>([]);
   
   const [totalGeralArvores, setTotalGeralArvores] = useState(0);
-  const [totalGeralResumo, setTotalGeralResumo] = useState(0); // 🟢 ESTADO DO TOTAL DO RESUMO
+  const [totalGeralResumo, setTotalGeralResumo] = useState(0); 
   const [carregando, setCarregando] = useState(false); 
   const [gerandoPDF, setGerandoPDF] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -118,14 +118,13 @@ export default function MapaScreen() {
   useEffect(() => {
     const tarefa = InteractionManager.runAfterInteractions(() => {
       verificarPerfil();
-      carregarDicionarioEServicos(); 
+      carregarDicionarioEServicos(); // Por padrão chama normal (sem o silencioso)
     });
     return () => tarefa.cancel();
   }, []);
 
   useEffect(() => {
     if (buscaFazenda && dicionario[buscaFazenda]) {
-      // 🟢 CORREÇÃO DA ORDEM DAS QUADRAS (Ex: 1, 2, 10, 30)
       const quadras = Object.keys(dicionario[buscaFazenda].quadras).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       setQuadrasDisponiveis(quadras);
     } else {
@@ -136,7 +135,6 @@ export default function MapaScreen() {
 
   useEffect(() => {
     if (buscaFazenda && buscaQuadra && dicionario[buscaFazenda]?.quadras[buscaQuadra]) {
-      // 🟢 CORREÇÃO DA ORDEM DOS RAMAIS
       const ramais = dicionario[buscaFazenda].quadras[buscaQuadra].ramais.sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true }));
       setRamaisDisponiveis(ramais);
     } else {
@@ -158,8 +156,9 @@ export default function MapaScreen() {
     }
   };
 
-  const carregarDicionarioEServicos = async () => {
-    setCarregando(true);
+  // 🟢 ATUALIZAÇÃO 1: Adicionado parâmetro 'silencioso' para não congelar a tela ao editar/excluir
+  const carregarDicionarioEServicos = async (silencioso = false) => {
+    if (!silencioso) setCarregando(true);
     try {
       const { data: servs } = await supabase.from('servicos').select('*').order('nome');
       if (servs) {
@@ -167,7 +166,6 @@ export default function MapaScreen() {
         await AsyncStorage.setItem('@mochila_servicos', JSON.stringify(servs));
       }
 
-      // 🟢 MANTIDO O LIMITE QUE VOCÊ COLOCOU: 6000
       const { data: mapaResumo, error } = await supabase.from('mapa_fazendas').select('fazenda, quadra, ramal, total_pes').limit(6000);
       if (error) throw new Error("Falha na rede");
 
@@ -184,14 +182,15 @@ export default function MapaScreen() {
       const mapaOffline = await AsyncStorage.getItem('@mochila_dicionario_mapa');
       if (mapaOffline) montarDicionario(JSON.parse(mapaOffline));
     }
-    setCarregando(false);
+    if (!silencioso) setCarregando(false);
   };
 
   const montarDicionario = (data: any[]) => {
     const dic: any = {};
-    let somaResumoLocal = 0; // 🟢 ACUMULADOR DO TOTAL DO RESUMO
-    // 🟢 CORREÇÃO: Forçando .toUpperCase() para agrupar Fazendas com grafias diferentes
-    const limpar = (txt: string) => txt ? txt.trim().replace(/\s+/g, ' ').toUpperCase() : 'N/A';
+    let somaResumoLocal = 0; 
+    
+    // 🟢 ATUALIZAÇÃO 2: Função Limpar blindada com String(txt) para evitar crash Fatal com números inteiros
+    const limpar = (txt: any) => txt ? String(txt).trim().replace(/\s+/g, ' ').toUpperCase() : 'N/A';
 
     data.forEach(item => {
       const faz = limpar(item.fazenda);
@@ -199,7 +198,7 @@ export default function MapaScreen() {
       const ramal = limpar(item.ramal);
       const pes = item.total_pes || 0;
 
-      somaResumoLocal += pes; // 🟢 SOMA GERAL FEITA AQUI SEM CUSTO EXTRA
+      somaResumoLocal += pes; 
 
       if (!dic[faz]) dic[faz] = { total: 0, quadras: {} };
       dic[faz].total += pes;
@@ -212,7 +211,7 @@ export default function MapaScreen() {
       }
     });
 
-    setTotalGeralResumo(somaResumoLocal); // 🟢 SETA O TOTAL PARA A TELA
+    setTotalGeralResumo(somaResumoLocal); 
     setDicionario(dic);
     setFazendasDisponiveis(Object.keys(dic).sort());
 
@@ -222,7 +221,7 @@ export default function MapaScreen() {
       quadras: Object.keys(dic[faz].quadras).map(qdr => ({
         quadra: qdr,
         total: dic[faz].quadras[qdr].total
-      })).sort((a, b) => a.quadra.localeCompare(b.quadra, undefined, { numeric: true })) // 🟢 ORDENAÇÃO NUMÉRICA NO RESUMO
+      })).sort((a, b) => a.quadra.localeCompare(b.quadra, undefined, { numeric: true }))
     })).sort((a, b) => a.fazenda.localeCompare(b.fazenda));
 
     setListaResumo(resumo);
@@ -236,7 +235,6 @@ export default function MapaScreen() {
     setCarregando(true);
 
     try {
-      // 🟢 IGNORANDO CASE SENSITIVE NA BUSCA (ilike)
       let query = supabase.from('mapa_fazendas').select('id, fazenda, quadra, ramal, total_pes, servico_permitido').ilike('fazenda', buscaFazenda);
       
       if (buscaQuadra) query = query.ilike('quadra', buscaQuadra);
@@ -287,10 +285,10 @@ export default function MapaScreen() {
   const processarDadosMapa = (data: any[]) => {
     let somaGeral = 0;
     const agrupamento: any = {};
-    // 🟢 CORREÇÃO: Forçando .toUpperCase() também no detalhamento
-    const limpar = (txt: string) => txt ? txt.trim().replace(/\s+/g, ' ').toUpperCase() : 'N/A';
+    
+    // 🟢 ATUALIZAÇÃO 2B: Limpar blindado aqui também
+    const limpar = (txt: any) => txt ? String(txt).trim().replace(/\s+/g, ' ').toUpperCase() : 'N/A';
 
-    // 🟢 CORREÇÃO DA ORDENAÇÃO NUMÉRICA DO RESULTADO E PDF
     const dadosOrdenados = [...data].sort((a, b) => {
       const fazA = limpar(a.fazenda);
       const fazB = limpar(b.fazenda);
@@ -470,10 +468,10 @@ export default function MapaScreen() {
     }
   };
 
-  // 🟢 AÇÕES DO MODAL (EDITAR E EXCLUIR)
+  // 🟢 ATUALIZAÇÃO 3: Proteção contra Total de Pés Vazio/Nulo no momento de abrir o modal
   const abrirModalEdicao = useCallback((ramal: any) => {
-    setEditServico(ramal.servico);
-    setEditQtd(ramal.total.toString());
+    setEditServico(ramal.servico || 'Não Definido');
+    setEditQtd(String(ramal.total || 0)); 
     setRamalEditando(ramal);
   }, []);
 
@@ -486,7 +484,8 @@ export default function MapaScreen() {
       const novaListaBruta = dadosBrutos.map(item => item.id === id ? { ...item, [campo]: valor } : item);
       setDadosBrutos(novaListaBruta);
       processarDadosMapa(novaListaBruta);
-      carregarDicionarioEServicos();
+      // 🟢 ATUALIZAÇÃO 4: Atualiza os totais no fundo, sem travar a tela
+      carregarDicionarioEServicos(true); 
     }
     setCarregando(false);
   };
@@ -547,7 +546,8 @@ export default function MapaScreen() {
       const novaListaBruta = dadosBrutos.filter(item => item.id !== id);
       setDadosBrutos(novaListaBruta);
       processarDadosMapa(novaListaBruta);
-      carregarDicionarioEServicos();
+      // 🟢 ATUALIZAÇÃO 4: Atualiza os totais no fundo
+      carregarDicionarioEServicos(true);
       setRamalEditando(null);
     }
     setCarregando(false);
@@ -590,7 +590,6 @@ export default function MapaScreen() {
 
       {abaAtiva === 'resumo' && (
         <View style={styles.flex1}>
-          {/* 🟢 TOTAL GERAL DISCRETO EXIBIDO AQUI */}
           {!carregando && listaResumo.length > 0 && (
             <Text style={styles.textoTotalResumo}>
               🌳 Total Geral Cadastrado: {totalGeralResumo.toLocaleString('pt-BR')} pés
@@ -676,10 +675,9 @@ export default function MapaScreen() {
               data={listaPlanaParaUI}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
-              // 🟢 OTIMIZAÇÕES EXTREMAS DE LISTA 🟢
               initialNumToRender={12} 
               maxToRenderPerBatch={10}
-              windowSize={3} // Reduz brutalmente o uso de memória (padrão é 21)
+              windowSize={3} 
               updateCellsBatchingPeriod={30}
               removeClippedSubviews={true}
               contentContainerStyle={styles.listaPadding}
@@ -748,7 +746,6 @@ const styles = StyleSheet.create({
   loaderMargin: { marginTop: 30 },
   textoVazio: { textAlign: 'center', color: '#7F8C8D', marginTop: 20 },
   
-  // 🟢 ESTILO NOVO: TEXTO TOTAL DISCRETO
   textoTotalResumo: { textAlign: 'right', color: '#95A5A6', fontSize: 12, fontStyle: 'italic', marginBottom: 8, marginRight: 5 },
   
   listaPaddingBottom: { paddingBottom: 50 },
