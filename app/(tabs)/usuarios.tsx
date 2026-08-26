@@ -167,6 +167,8 @@ export default function UsuariosScreen() {
               <Picker.Item label="Fiscal de Campo (Lança Produção)" value="Fiscal de Campo" />
               <Picker.Item label="Encarregado (Supervisiona Equipe)" value="Encarregado" />
               <Picker.Item label="Supervisor (Gere Fazenda)" value="Supervisor" />
+              {/* 🟢 NOVO CARGO ADICIONADO AQUI */}
+              <Picker.Item label="Engenheiro (Acesso Técnico/Gerencial)" value="Engenheiro" />
               <Picker.Item label="Administrador (Acesso Total)" value="Administrador" />
             </Picker>
           </View>
@@ -233,6 +235,8 @@ export default function UsuariosScreen() {
                 <Picker.Item label="Fiscal de Campo" value="Fiscal de Campo" />
                 <Picker.Item label="Encarregado" value="Encarregado" />
                 <Picker.Item label="Supervisor" value="Supervisor" />
+                {/* 🟢 NOVO CARGO ADICIONADO AQUI TAMBÉM */}
+                <Picker.Item label="Engenheiro" value="Engenheiro" />
                 <Picker.Item label="Administrador" value="Administrador" />
               </Picker>
             </View>

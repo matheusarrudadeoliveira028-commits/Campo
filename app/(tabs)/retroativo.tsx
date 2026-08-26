@@ -42,7 +42,7 @@ export default function RetroativoScreen() {
   const [colaborador, setColaborador] = useState('');
   const [servico, setServico] = useState('');
   const [servicoSelecionadoCompleto, setServicoSelecionadoCompleto] = useState<any>(null);
-  
+
   // 👉 RECURSOS DA TELA PRINCIPAL
   const [tipoResina, setTipoResina] = useState('ELLIOTTI');
   const [ramaisSelecionados, setRamaisSelecionados] = useState<string[]>([]); 
@@ -55,7 +55,7 @@ export default function RetroativoScreen() {
   // 👉 CAMPOS PARA O MODO RETROATIVO
   const [dataRetroativa, setDataRetroativa] = useState('');
   const [horaRetroativa, setHoraRetroativa] = useState('');
-  
+
   const [listaColaboradores, setListaColaboradores] = useState<any[]>([]);
   const [listaServicos, setListaServicos] = useState<any[]>([]);
   const [mapaCompleto, setMapaCompleto] = useState<any[]>([]);
@@ -63,14 +63,14 @@ export default function RetroativoScreen() {
   const [quadrasDisponiveis, setQuadrasDisponiveis] = useState<string[]>([]);
   const [ramaisDisponiveis, setRamaisDisponiveis] = useState<any[]>([]);
   const [limitePes, setLimitePes] = useState<number | null>(null);
-  
+
   const [salvando, setSalvando] = useState(false);
   const [carregandoDados, setCarregandoDados] = useState(true);
 
   const [perfilLogado, setPerfilLogado] = useState<any>(null);
   const [lancamentosPendentes, setLancamentosPendentes] = useState<any[]>([]);
   const [sincronizando, setSincronizando] = useState(false);
-  
+
   const [isOffline, setIsOffline] = useState(false);
 
   // ESTADOS DOS MODAIS E EDIÇÃO
@@ -79,13 +79,16 @@ export default function RetroativoScreen() {
   const [indexEdicao, setIndexEdicao] = useState<number | null>(null);
   const [dataOriginalEdicao, setDataOriginalEdicao] = useState<string | null>(null);
 
-  // 👉 MELHORIA 1: InteractionManager PARA NÃO TRAVAR O MENU
+  // 🟢 NOVA TRAVA: Detecta se é Diária ou Carregamento (Sem Local)
+  const nomeServicoLowerCase = servicoSelecionadoCompleto?.nome?.toLowerCase() || '';
+  const isSemLocal = nomeServicoLowerCase.includes('diária') || nomeServicoLowerCase.includes('diaria') || nomeServicoLowerCase.includes('carregamento');
+
   useFocusEffect(
     useCallback(() => {
       const tarefa = InteractionManager.runAfterInteractions(() => {
         carregarUsuarioLogado(); 
         carregarLancamentosLocais(); 
-        
+
         if (indexEdicao === null) {
           const hoje = new Date();
           setDataRetroativa(hoje.toLocaleDateString('pt-BR'));
@@ -151,12 +154,12 @@ export default function RetroativoScreen() {
       }
       if (mapa) {
         setMapaCompleto(mapa);
-        
+
         // 🟢 ORDENAÇÃO DE FAZENDAS
         const fazendasUnicas = [...new Set(mapa.map(item => item.fazenda))] as string[];
         fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
         setFazendasDisponiveis(fazendasUnicas);
-        
+
         await AsyncStorage.setItem('@mochila_mapa', JSON.stringify(mapa));
       }
       setIsOffline(false);
@@ -171,7 +174,7 @@ export default function RetroativoScreen() {
       if (mochilaMapa) {
         const mapaParsed = JSON.parse(mochilaMapa);
         setMapaCompleto(mapaParsed);
-        
+
         const fazendasUnicas = [...new Set(mapaParsed.map((item: any) => item.fazenda))] as string[];
         fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
         setFazendasDisponiveis(fazendasUnicas);
@@ -203,16 +206,16 @@ export default function RetroativoScreen() {
     }
     if (quadra) {
       const ramaisBrutos = mapaCompleto.filter(m => m.fazenda === fazenda && m.quadra === quadra);
-      
+
       const ramaisAgrupados: Record<string, any> = {};
-      
+
       ramaisBrutos.forEach(r => {
         const numRamal = String(r.ramal).trim().toUpperCase(); 
         if (!ramaisAgrupados[numRamal]) {
           ramaisAgrupados[numRamal] = { ...r, ramal: numRamal, total_pes: 0 };
         }
         ramaisAgrupados[numRamal].total_pes += (r.total_pes || 0);
-        
+
         if (r.data_bloqueio) {
           ramaisAgrupados[numRamal].data_bloqueio = r.data_bloqueio;
         }
@@ -220,7 +223,7 @@ export default function RetroativoScreen() {
 
       const ramaisDessaQuadra = Object.values(ramaisAgrupados);
       ramaisDessaQuadra.sort((a: any, b: any) => String(a.ramal).localeCompare(String(b.ramal), undefined, { numeric: true }));
-      
+
       setRamaisDisponiveis(ramaisDessaQuadra);
     } else {
       setRamaisDisponiveis([]);
@@ -250,7 +253,7 @@ export default function RetroativoScreen() {
   }, [servicoSelecionadoCompleto, quantidade]);
 
   const isColeta = servicoSelecionadoCompleto?.nome?.toLowerCase().includes('coleta');
-  
+
   const permiteMultiplosRamais = servicoSelecionadoCompleto?.permite_multiplos === true || isColeta;
 
   const toggleRamal = (ramalStr: string) => {
@@ -272,7 +275,7 @@ export default function RetroativoScreen() {
   // 👉 LÓGICA DE ALERTAS E TRAVA COM CORREÇÃO DE DECIMAIS
   const handleMudancaQuantidade = (texto: string) => {
     const valorDigitado = converterParaNumero(texto);
-    
+
     if (!permiteMultiplosRamais && limitePes !== null && valorDigitado > limitePes) {
       if (!isOffline) {
         supabase.from('alertas_limite').insert([{
@@ -312,9 +315,11 @@ export default function RetroativoScreen() {
   const prepararEdicao = (index: number) => {
     const item = lancamentosPendentes[index];
     setColaborador(item.colaborador);
-    setFazenda(item.fazenda);
-    setQuadra(item.quadra);
-    
+
+    // Se a fazenda for "-", deixamos em branco para não bugar o Picker
+    setFazenda(item.fazenda === '-' ? '' : item.fazenda);
+    setQuadra(item.quadra === '-' ? '' : item.quadra);
+
     let nomePuroServico = item.servico;
     if (item.servico.includes(' - HÍBRIDO')) {
       nomePuroServico = item.servico.replace(' - HÍBRIDO', '');
@@ -329,9 +334,9 @@ export default function RetroativoScreen() {
 
     setServico(nomePuroServico);
     setServicoSelecionadoCompleto(listaServicos.find(s => s.nome === nomePuroServico) || null);
-    
+
     setTipoResina(item.tipo_resina || 'ELLIOTTI');
-    setRamaisSelecionados(String(item.ramal).split(', '));
+    setRamaisSelecionados(item.ramal === '-' ? [] : String(item.ramal).split(', '));
     setQuantidade(String(item.quantidade));
 
     // Extrai data e hora salvas e coloca de volta nos campos
@@ -359,8 +364,15 @@ export default function RetroativoScreen() {
   };
 
   const salvarLancamento = async () => {
-    if (!colaborador || !servico || !fazenda || !quadra || ramaisSelecionados.length === 0 || !quantidade || !dataRetroativa || !horaRetroativa) { 
-      return Alert.alert("Aviso", "Preencha todos os campos, incluindo a Data e Hora!"); 
+    if (!colaborador || !servico || !quantidade || !dataRetroativa || !horaRetroativa) { 
+      return Alert.alert("Aviso", "Preencha os campos obrigatórios, incluindo a Data e Hora!"); 
+    }
+
+    // Validação de Fazenda, Quadra e Ramal Apenas se Não for Diária/Carregamento
+    if (!isSemLocal) {
+      if (!fazenda || !quadra || ramaisSelecionados.length === 0) {
+        return Alert.alert("Aviso", "Preencha a Fazenda, Quadra e selecione o Ramal!");
+      }
     }
 
     if (dataRetroativa.length !== 10) return Alert.alert("Erro", "Formato de data inválido. Use DD/MM/AAAA");
@@ -371,17 +383,24 @@ export default function RetroativoScreen() {
     const hojeISO = `${ano}-${mes}-${dia}`;
     const dataIsoFinal = `${hojeISO}T${horaRetroativa}:00.000Z`;
 
-    for (let r of ramaisSelecionados) {
-      const ramalInfo = mapaCompleto.find(m => m.fazenda === fazenda && m.quadra === quadra && String(m.ramal).trim().toUpperCase() === String(r).trim().toUpperCase());
-      if (!ramalInfo) {
-        return Alert.alert("❌ Erro", `O ramal ${r} não foi encontrado no mapa desta fazenda e quadra.`);
-      }
-      if (ramalInfo.data_bloqueio && hojeISO !== ramalInfo.data_bloqueio) { 
-        return Alert.alert("📅 Data Bloqueada", `Ramal ${r} permitido apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
+    if (!isSemLocal) {
+      for (let r of ramaisSelecionados) {
+        const ramalInfo = mapaCompleto.find(m => m.fazenda === fazenda && m.quadra === quadra && String(m.ramal).trim().toUpperCase() === String(r).trim().toUpperCase());
+        if (!ramalInfo) {
+          return Alert.alert("❌ Erro", `O ramal ${r} não foi encontrado no mapa desta fazenda e quadra.`);
+        }
+        if (ramalInfo.data_bloqueio && hojeISO !== ramalInfo.data_bloqueio) { 
+          return Alert.alert("📅 Data Bloqueada", `Ramal ${r} permitido apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
+        }
       }
     }
 
-    if (!permiteMultiplosRamais && limitePes !== null && converterParaNumero(quantidade) > limitePes) {
+    const qtdNumerica = converterParaNumero(quantidade);
+    if (qtdNumerica <= 0) {
+      return Alert.alert("Aviso", "A quantidade deve ser maior que zero.");
+    }
+
+    if (!permiteMultiplosRamais && limitePes !== null && qtdNumerica > limitePes) {
         setQuantidade('');
         return Alert.alert("⚠️ Limite Excedido", "A quantidade informada é maior que o permitido para este ramal.");
     }
@@ -397,10 +416,10 @@ export default function RetroativoScreen() {
       const novoLancamento = {
         colaborador, 
         servico: nomeServicoFinalParaOBanco, 
-        fazenda, 
-        quadra, 
-        ramal: numRamalFinal, 
-        quantidade: converterParaNumero(quantidade), 
+        fazenda: isSemLocal ? '-' : fazenda, 
+        quadra: isSemLocal ? '-' : quadra, 
+        ramal: isSemLocal ? '-' : numRamalFinal, 
+        quantidade: qtdNumerica, 
         valor_unitario: valorUnitario, 
         valor_total: valorTotalCalculado, 
         data: dataIsoFinal, 
@@ -409,7 +428,7 @@ export default function RetroativoScreen() {
       };
 
       let novaLista = [...lancamentosPendentes];
-      
+
       if (indexEdicao !== null) {
         novaLista[indexEdicao] = novoLancamento; 
       } else {
@@ -446,7 +465,7 @@ export default function RetroativoScreen() {
 
       const { error: dbError } = await supabase.from('diarios_campo').insert(lancamentosProntosParaNuvem);
       if (dbError) throw dbError;
-      
+
       await AsyncStorage.removeItem('@lancamentos_off');
       setLancamentosPendentes([]);
       carregarDadosBase();
@@ -491,7 +510,7 @@ export default function RetroativoScreen() {
         )}
 
         <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1, paddingBottom: 450 }} keyboardShouldPersistTaps="handled">
-          
+
           <View style={styles.topBar}>
             {perfilLogado ? (
               <Text style={styles.userText}>👤 {perfilLogado.cargo}: {perfilLogado.nome}</Text>
@@ -568,28 +587,30 @@ export default function RetroativoScreen() {
                   </View>
                 </View>
 
-                {/* 👉 FAZENDA E QUADRA EM COLUNA PARA NÃO CORTAR TEXTO */}
-                <View style={styles.row}>
-                  <View style={styles.col}>
-                    <Text style={styles.label}>Fazenda:</Text>
-                    <View style={styles.pickerContainer}>
-                      <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
-                        <Picker.Item label="..." value="" />
-                        {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
-                      </Picker>
+                {/* 🟢 Esconde Fazenda e Quadra caso seja Diária/Carregamento */}
+                {!isSemLocal && (
+                  <View style={styles.row}>
+                    <View style={styles.col}>
+                      <Text style={styles.label}>Fazenda:</Text>
+                      <View style={styles.pickerContainer}>
+                        <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
+                          <Picker.Item label="..." value="" />
+                          {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                        </Picker>
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.col}>
-                    <Text style={styles.label}>Quadra:</Text>
-                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}>
-                      <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
-                        <Picker.Item label="..." value="" />
-                        {quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}
-                      </Picker>
+                    <View style={styles.col}>
+                      <Text style={styles.label}>Quadra:</Text>
+                      <View style={[styles.pickerContainer, !fazenda && styles.disabled]}>
+                        <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
+                          <Picker.Item label="..." value="" />
+                          {quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}
+                        </Picker>
+                      </View>
                     </View>
                   </View>
-                </View>
+                )}
 
                 <Text style={styles.label}>Serviço Feito:</Text>
                 <View style={styles.pickerContainer}>
@@ -613,49 +634,55 @@ export default function RetroativoScreen() {
                   </>
                 )}
 
-                <Text style={styles.label}>Ramal:</Text>
-                {!quadra ? (
-                  <Text style={styles.textoDica}>Selecione a quadra primeiro para carregar os ramais.</Text>
-                ) : (
-                  <View>
-                    {permiteMultiplosRamais && (
-                      <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 5}}>
-                        <TouchableOpacity onPress={selecionarTodosRamais} style={styles.btnSelecionarTodos}>
-                          <Text style={styles.btnSelecionarTodosText}>✓ Todos da Quadra</Text>
-                        </TouchableOpacity>
+                {/* 🟢 Esconde Ramal caso seja Diária/Carregamento */}
+                {!isSemLocal && (
+                  <>
+                    <Text style={styles.label}>Ramal:</Text>
+                    {!quadra ? (
+                      <Text style={styles.textoDica}>Selecione a quadra primeiro para carregar os ramais.</Text>
+                    ) : (
+                      <View>
+                        {permiteMultiplosRamais && (
+                          <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 5}}>
+                            <TouchableOpacity onPress={selecionarTodosRamais} style={styles.btnSelecionarTodos}>
+                              <Text style={styles.btnSelecionarTodosText}>✓ Todos da Quadra</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+
+                        <View style={styles.chipsContainer}>
+                          {ramaisDisponiveis.map((r, i) => {
+                            const rStr = String(r.ramal);
+                            const selecionado = ramaisSelecionados.includes(rStr);
+                            return (
+                              <TouchableOpacity 
+                                key={i} 
+                                style={[styles.chip, selecionado && styles.chipSelecionado]} 
+                                onPress={() => toggleRamal(rStr)}
+                              >
+                                <Text style={[styles.chipText, selecionado && styles.chipTextSelecionado]}>{rStr}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
                       </View>
                     )}
-                    
-                    <View style={styles.chipsContainer}>
-                      {ramaisDisponiveis.map((r, i) => {
-                        const rStr = String(r.ramal);
-                        const selecionado = ramaisSelecionados.includes(rStr);
-                        return (
-                          <TouchableOpacity 
-                            key={i} 
-                            style={[styles.chip, selecionado && styles.chipSelecionado]} 
-                            onPress={() => toggleRamal(rStr)}
-                          >
-                            <Text style={[styles.chipText, selecionado && styles.chipTextSelecionado]}>{rStr}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
+                  </>
                 )}
 
                 <Text style={styles.label}>Quantidade Total (no lote selecionado):</Text>
                 <TextInput 
-                  style={[styles.inputQuantidade, ramaisSelecionados.length === 0 && styles.disabledInput]} 
+                  // 🟢 O campo só fica desabilitado se não for serviço sem local E não tiver ramal
+                  style={[styles.inputQuantidade, (ramaisSelecionados.length === 0 && !isSemLocal) && styles.disabledInput]} 
                   placeholder="Ex: 50" 
                   keyboardType="numeric" 
                   value={quantidade} 
                   onChangeText={handleMudancaQuantidade} 
-                  editable={ramaisSelecionados.length > 0} 
+                  editable={ramaisSelecionados.length > 0 || isSemLocal} 
                 />
 
-                {/* 🟢 NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO DO VALOR CHEIO */}
-                {limitePes !== null && (
+                {/* 🟢 BOTÃO DE PREENCHIMENTO AUTOMÁTICO DO VALOR CHEIO (Oculto se for diária) */}
+                {limitePes !== null && !isSemLocal && (
                   <TouchableOpacity 
                     style={styles.btnAutoPreencher} 
                     onPress={() => handleMudancaQuantidade(String(limitePes))}
@@ -810,12 +837,12 @@ const styles = StyleSheet.create({
   btnSyncTexto: { color: '#F39C12', fontWeight: 'bold', fontSize: 12 },
   card: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 15, elevation: 5 },
   label: { fontSize: 14, fontWeight: '700', color: '#34495E', marginBottom: 5, marginTop: 15 },
-  
+
   pickerContainer: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, backgroundColor: '#F8FAFC', overflow: 'hidden', height: 60, justifyContent: 'center' },
   picker: { height: 60, width: '100%' },
-  
+
   disabled: { backgroundColor: '#EAECEE', opacity: 0.6 },
-  
+
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 5, marginBottom: 10 },
   chip: { backgroundColor: '#F8FAFC', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 8, borderWidth: 1, borderColor: '#D5DBDB' },
   chipSelecionado: { backgroundColor: '#2980B9', borderColor: '#2980B9' },
@@ -824,29 +851,28 @@ const styles = StyleSheet.create({
   btnSelecionarTodos: { backgroundColor: '#27AE60', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
   btnSelecionarTodosText: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
   textoDica: { color: '#7F8C8D', fontSize: 13, fontStyle: 'italic', marginTop: 5 },
-  
+
   inputQuantidade: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
   disabledInput: { backgroundColor: '#EAECEE' },
-  
-  // 🟢 ESTILO NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO 
+
   btnAutoPreencher: { backgroundColor: '#E8F8F5', padding: 12, borderRadius: 8, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#27AE60', borderStyle: 'dashed' },
   btnAutoPreencherTexto: { color: '#27AE60', fontWeight: 'bold', fontSize: 13 },
-  
+
   rowData: { flexDirection: 'row', justifyContent: 'space-between' },
   colData: { width: '48%' },
 
   row: { flexDirection: 'column' },
   col: { width: '100%', marginBottom: 10 },
-  
+
   input: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
-  
+
   cardGanho: { backgroundColor: '#E8F8F5', padding: 15, borderRadius: 10, marginTop: 20, alignItems: 'center', borderLeftWidth: 5, borderLeftColor: '#27AE60' },
   textoGanho: { color: '#1E8449', fontSize: 13, fontWeight: 'bold' },
   valorGanho: { color: '#1E8449', fontSize: 24, fontWeight: '900' },
   button: { backgroundColor: '#2980B9', padding: 18, borderRadius: 8, alignItems: 'center', marginTop: 15 },
   buttonDisabled: { backgroundColor: '#95A5A6' },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
-  
+
   edicaoAviso: { backgroundColor: '#FCF3CF', padding: 10, borderRadius: 8, marginBottom: 15, alignItems: 'center' },
   edicaoAvisoTexto: { color: '#D35400', fontWeight: 'bold', fontSize: 12 },
   rowBotoesEdicao: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },

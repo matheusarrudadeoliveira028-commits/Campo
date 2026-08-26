@@ -91,6 +91,8 @@ export default function PermissoesScreen() {
             <Picker.Item label="Fiscal de Campo" value="Fiscal de Campo" />
             <Picker.Item label="Supervisor" value="Supervisor" />
             <Picker.Item label="Encarregado" value="Encarregado" />
+            {/* 🟢 CARGO ENGENHEIRO ADICIONADO AQUI */}
+            <Picker.Item label="Engenheiro" value="Engenheiro" />
             <Picker.Item label="Administrador" value="Administrador" />
           </Picker>
         </View>

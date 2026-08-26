@@ -7,21 +7,12 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../src/supabase';
 
-// 👉 ALGORITMO OFFLINE DE FERIADOS NACIONAIS (Fixos + Móveis como Páscoa e Carnaval)
+// 👉 ALGORITMO OFFLINE DE FERIADOS NACIONAIS
 const obterFeriadosNacionais = (ano: number) => {
   const feriados = [
-    '01/01', // Confraternização Universal
-    '21/04', // Tiradentes
-    '01/05', // Dia do Trabalhador
-    '07/09', // Independência do Brasil
-    '12/10', // Nossa Senhora Aparecida
-    '02/11', // Finados
-    '15/11', // Proclamação da República
-    '20/11', // Consciência Negra
-    '25/12'  // Natal
+    '01/01', '21/04', '01/05', '07/09', '12/10', '02/11', '15/11', '20/11', '25/12'
   ];
 
-  // Cálculo exato da Páscoa
   const a = ano % 19;
   const b = Math.floor(ano / 100);
   const c = ano % 100;
@@ -51,14 +42,12 @@ const obterFeriadosNacionais = (ano: number) => {
   feriados.push(formatar(addDias(pascoa, -2)));  // Sexta-feira Santa
   feriados.push(formatar(addDias(pascoa, 60)));  // Corpus Christi
 
-  // Converte para o formato ISO (YYYY-MM-DD) para facilitar a comparação no código
   return feriados.map(dMes => `${ano}-${dMes.split('/')[1]}-${dMes.split('/')[0]}`);
 };
 
 export default function RelatoriosScreen() {
   const [colaboradorSelecionado, setColaboradorSelecionado] = useState('');
   
-  // DATAS E FERIADOS
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
   const [feriados, setFeriados] = useState('');
@@ -70,7 +59,6 @@ export default function RelatoriosScreen() {
   useEffect(() => {
     carregarColaboradores();
     
-    // Sugere o mês atual preenchido automaticamente
     const hoje = new Date();
     const primeiroDia = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
     const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
@@ -101,13 +89,11 @@ export default function RelatoriosScreen() {
     return `${y}-${m}-${d}`;
   };
 
-  // 👉 TRITURADOR DE NOMES
   const limparNome = (nome: string) => {
     if (!nome) return '';
     return nome.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
   };
 
-  // 👉 EXTRATOR UNIVERSAL DE DATAS (Resolve o bug do formato Americano x Brasileiro)
   const extrairAdmissaoISO = (admStr: any) => {
     if (!admStr) return null;
     let limpa = String(admStr).split('T')[0].split(' ')[0].trim();
@@ -133,13 +119,13 @@ export default function RelatoriosScreen() {
   };
 
   const gerarPDF = async () => {
-    if (!colaboradorSelecionado) return Alert.alert('Aviso', 'Selecione um colaborador (ou Todos)!');
+    if (!colaboradorSelecionado) return Alert.alert('Aviso', 'Selecione um colaborador!');
     if (!dataInicio || !dataFim) return Alert.alert('Aviso', 'Preencha a data inicial e final!');
 
     const dtInicioBD = converterDataParaBanco(dataInicio);
     const dtFimBD = converterDataParaBanco(dataFim);
 
-    if (!dtInicioBD || !dtFimBD) return Alert.alert('Erro', 'Use o formato DD/MM/AAAA para as datas.');
+    if (!dtInicioBD || !dtFimBD) return Alert.alert('Erro', 'Use o formato DD/MM/AAAA.');
 
     const arrayFeriadosManuais = feriados.split(',').map(d => d.trim().padStart(2, '0')).filter(d => d !== '00');
     
@@ -154,7 +140,6 @@ export default function RelatoriosScreen() {
     setGerando(true);
 
     try {
-      // 👉 CARREGAMENTO DO LOGO À PROVA DE BALAS (EXPO GO + APK + WEB)
       let base64Logo = '';
       try {
         const asset = Asset.fromModule(require('../../assets/images/logo.png'));
@@ -164,41 +149,43 @@ export default function RelatoriosScreen() {
           base64Logo = asset.uri;
         } else {
           let uriDaImagem = asset.localUri || asset.uri;
-          
-          // Se for Expo Go (http), o Android bloqueia. Resolvemos baixando o arquivo fisicamente!
           if (uriDaImagem.startsWith('http')) {
-            const { uri } = await FileSystem.downloadAsync(
-              uriDaImagem,
-              FileSystem.cacheDirectory + 'logo_temp_pdf.png'
-            );
+            const { uri } = await FileSystem.downloadAsync(uriDaImagem, FileSystem.cacheDirectory + 'logo_temp_pdf.png');
             uriDaImagem = uri;
           }
-          
-          // Converte para Base64 puro. O HTML renderiza nativamente sem bloqueios de segurança do Android.
-          const base64 = await FileSystem.readAsStringAsync(uriDaImagem, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
+          const base64 = await FileSystem.readAsStringAsync(uriDaImagem, { encoding: FileSystem.EncodingType.Base64 });
           base64Logo = `data:image/png;base64,${base64}`;
         }
-      } catch (imgErr) {
-        console.warn("Aviso: Não foi possível carregar a logo para o PDF.", imgErr);
-      }
+      } catch (imgErr) {}
 
       let query = supabase.from('diarios_campo').select('*')
         .gte('data', `${dtInicioBD} 00:00:00`)
         .lte('data', `${dtFimBD} 23:59:59`)
         .order('data', { ascending: true });
 
-      if (colaboradorSelecionado !== 'TODOS') {
-        query = query.eq('colaborador', colaboradorSelecionado);
-      }
-
+      if (colaboradorSelecionado !== 'TODOS') query = query.eq('colaborador', colaboradorSelecionado);
+      
       const { data: lancamentos, error: errLanc } = await query;
       if (errLanc) throw errLanc;
 
-      if (!lancamentos || lancamentos.length === 0) {
+      const pIniBusca = dtInicioBD.split('-');
+      const dataMenos60 = new Date(parseInt(pIniBusca[0], 10), parseInt(pIniBusca[1], 10) - 1, parseInt(pIniBusca[2], 10) - 60);
+      const dataMenos60Str = formatarDataIso(dataMenos60);
+
+      let queryAtestados = supabase.from('diarios_campo').select('*')
+        .eq('servico', 'Atestado')
+        .gte('data', `${dataMenos60Str} 00:00:00`)
+        .lt('data', `${dtInicioBD} 00:00:00`);
+
+      if (colaboradorSelecionado !== 'TODOS') queryAtestados = queryAtestados.eq('colaborador', colaboradorSelecionado);
+      
+      const { data: atestadosAnteriores } = await queryAtestados;
+
+      const todosRegistros = [...(lancamentos || []), ...(atestadosAnteriores || [])];
+
+      if (todosRegistros.length === 0) {
         setGerando(false);
-        return Alert.alert('Aviso', 'Nenhum lançamento encontrado neste período.');
+        return Alert.alert('Aviso', 'Nenhum lançamento encontrado.');
       }
 
       const { data: feriasDB } = await supabase.from('ferias').select('*');
@@ -206,22 +193,18 @@ export default function RelatoriosScreen() {
       const estaDeFerias = (nome: string, dataLancamento: string) => {
         const dataFormatada = dataLancamento.split('T')[0];
         return feriasDB?.some(f => 
-          f.colaborador_nome === nome && 
+          (f.colaborador_nome === nome || f.colaborador === nome) && 
           dataFormatada >= f.data_inicio && 
           dataFormatada <= f.data_fim
         );
       };
 
-      const agrupado = lancamentos.reduce((acc: any, item: any) => {
+      const agrupado = todosRegistros.reduce((acc: any, item: any) => {
         const tipoFolha = estaDeFerias(item.colaborador, item.data) ? 'Diaria' : 'Registrado';
         const chaveAgrupamento = `${item.colaborador}_${tipoFolha}`;
 
         if (!acc[chaveAgrupamento]) {
-          acc[chaveAgrupamento] = {
-            nome: item.colaborador,
-            tipo: tipoFolha,
-            registros: []
-          };
+          acc[chaveAgrupamento] = { nome: item.colaborador, tipo: tipoFolha, registros: [] };
         }
         acc[chaveAgrupamento].registros.push(item);
         return acc;
@@ -233,25 +216,20 @@ export default function RelatoriosScreen() {
       chavesFolhas.forEach((chave, index) => {
         const folha = agrupado[chave];
         
-        const totalGeral = folha.registros.reduce((soma: number, item: any) => soma + (item.valor_total || 0), 0);
-        const totalQuantidade = folha.registros.reduce((soma: number, item: any) => soma + (Number(item.quantidade) || 0), 0);
+        const totalGeral = folha.registros.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (item.valor_total || 0)), 0);
+        const totalQuantidade = folha.registros.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (Number(item.quantidade) || 0)), 0);
         
-        const encarregadoNome = folha.registros.length > 0 && folha.registros[0].fiscal_nome 
-            ? folha.registros[0].fiscal_nome 
-            : 'Não Identificado';
+        const encarregadoNome = folha.registros.find((r: any) => r.fiscal_nome)?.fiscal_nome || 'Não Identificado';
 
         const nomeLimpoFolha = limparNome(folha.nome);
         const dadosDoColaborador = listaColaboradores.find(c => limparNome(c.nome) === nomeLimpoFolha);
         
         let dataAdmissaoIsoStr: string | null = null;
-
         if (dadosDoColaborador) {
-          const adm = dadosDoColaborador.data_admissao || dadosDoColaborador.created_at;
-          dataAdmissaoIsoStr = extrairAdmissaoISO(adm);
+          dataAdmissaoIsoStr = extrairAdmissaoISO(dadosDoColaborador.data_admissao || dadosDoColaborador.created_at);
         }
 
         let linhasTabela = '';
-        
         const pIni = dtInicioBD.split('-');
         let dataAtualLoop = new Date(parseInt(pIni[0], 10), parseInt(pIni[1], 10) - 1, parseInt(pIni[2], 10), 12, 0, 0);
 
@@ -263,36 +241,26 @@ export default function RelatoriosScreen() {
           const diaDaSemana = dataAtualLoop.getDay(); 
           const diaMesStr = isoDate.split('-')[2];
 
-          const registrosDoDia = folha.registros.filter((r: any) => r.data.startsWith(isoDate));
+          const registrosProducao = folha.registros.filter((r: any) => 
+            r.data.startsWith(isoDate) && r.servico !== 'Atestado'
+          );
 
-          if (registrosDoDia.length > 0) {
+          if (registrosProducao.length > 0) {
             
-            // 🟢 LÓGICA DE AGRUPAMENTO DE RAMAIS INJETADA AQUI 🟢
-            const registrosAgrupados = registrosDoDia.reduce((acc: any, item: any) => {
-              const chave = `${item.servico}_${item.fazenda}_${item.quadra}_${item.valor_unitario}`;
-              
-              if (!acc[chave]) {
-                acc[chave] = {
-                  ...item,
-                  quantidade: Number(item.quantidade) || 0,
-                  valor_total: Number(item.valor_total) || 0,
-                  ramais: item.ramal ? [String(item.ramal)] : []
-                };
+            const registrosAgrupados = registrosProducao.reduce((acc: any, item: any) => {
+              const chv = `${item.servico}_${item.fazenda}_${item.quadra}_${item.valor_unitario}`;
+              if (!acc[chv]) {
+                acc[chv] = { ...item, quantidade: Number(item.quantidade) || 0, valor_total: Number(item.valor_total) || 0, ramais: item.ramal ? [String(item.ramal)] : [] };
               } else {
-                acc[chave].quantidade += Number(item.quantidade) || 0;
-                acc[chave].valor_total += Number(item.valor_total) || 0;
-                if (item.ramal) {
-                  acc[chave].ramais.push(String(item.ramal));
-                }
+                acc[chv].quantidade += Number(item.quantidade) || 0;
+                acc[chv].valor_total += Number(item.valor_total) || 0;
+                if (item.ramal) acc[chv].ramais.push(String(item.ramal));
               }
               return acc;
             }, {});
 
             Object.values(registrosAgrupados).forEach((item: any) => {
-              // Remove ramais duplicados e formata com vírgula
-              const ramaisUnicos = [...new Set(item.ramais)];
-              const ramaisStr = ramaisUnicos.join(', ') || '-'; 
-              
+              const ramaisStr = [...new Set(item.ramais)].join(', ') || '-'; 
               const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
               const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
               
@@ -309,21 +277,32 @@ export default function RelatoriosScreen() {
                 </tr>
               `;
             });
-            // 🟢 FIM DA LÓGICA DE AGRUPAMENTO 🟢
 
           } else {
-            const isFeriadoManual = arrayFeriadosManuais.includes(diaMesStr);
-            const isFeriadoNacional = listaFeriadosNacionais.includes(isoDate);
-            const isFeriado = isFeriadoNacional || isFeriadoManual;
-
-            const isFerias = feriasDB?.some((f: any) => 
-              f.colaborador_nome === folha.nome && 
-              isoDate >= f.data_inicio && 
-              isoDate <= f.data_fim
-            );
             
+            const isAtestadoMultiDia = folha.registros.some((r: any) => {
+              if (r.servico !== 'Atestado') return false;
+              
+              const dtIniStr = r.data_atestado || r.data.split('T')[0]; 
+              const dias = Number(r.dias_atestado) || 1;
+              
+              const dtIniObj = new Date(dtIniStr + 'T12:00:00');
+              const dtFimObj = new Date(dtIniObj);
+              dtFimObj.setDate(dtFimObj.getDate() + (dias - 1));
+              
+              const dtFimStr = formatarDataIso(dtFimObj);
+              
+              return isoDate >= dtIniStr && isoDate <= dtFimStr;
+            });
+
+            const isFeriado = listaFeriadosNacionais.includes(isoDate) || arrayFeriadosManuais.includes(diaMesStr);
+            const isFerias = feriasDB?.some((f: any) => 
+              (f.colaborador_nome === folha.nome || f.colaborador === folha.nome) && 
+              isoDate >= f.data_inicio && isoDate <= f.data_fim
+            );
             const isAntesAdmissao = dataAdmissaoIsoStr !== null && (isoDate < dataAdmissaoIsoStr);
             
+            // 🟢 AQUI ESTÁ A MÁGICA: Mudei a ordem. Agora Domingo, Sábado e Feriado vencem o Atestado.
             if (isAntesAdmissao) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F4F6F6;"></td></tr>`;
             } else if (isFerias) {
@@ -334,6 +313,9 @@ export default function RelatoriosScreen() {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EAEDED; color: #7F8C8D; font-weight: bold; letter-spacing: 2px;">DOMINGO</td></tr>`;
             } else if (diaDaSemana === 6) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EBF5FB; color: #2980B9; font-weight: bold; letter-spacing: 2px;">SÁBADO</td></tr>`;
+            } else if (isAtestadoMultiDia) {
+              // Atestado só vai aparecer nos dias de semana agora (Segunda a Sexta)
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #D6EAF8; color: #2874A6; font-weight: bold; letter-spacing: 2px;">ATESTADO MÉDICO</td></tr>`;
             } else {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FDEDEC; color: #E74C3C; font-weight: bold; letter-spacing: 2px;">FALTA</td></tr>`;
             }
@@ -374,7 +356,6 @@ export default function RelatoriosScreen() {
               </thead>
               <tbody>
                 ${linhasTabela}
-                <!-- 🟢 ADICIONADO A LINHA DE QUANTIDADE TOTAL -->
                 <tr>
                   <td colspan="5" style="text-align: right; font-weight: bold; background-color: #E8E8E8;">QUANTIDADE TOTAL:</td>
                   <td style="font-weight: bold; background-color: #E8E8E8; font-size: 13px;">${totalQuantidade}</td>
@@ -434,7 +415,6 @@ export default function RelatoriosScreen() {
         </html>
       `;
 
-      // 👉 BIFURCAÇÃO PERFEITA WEB x MOBILE
       if (Platform.OS === 'web') {
         const iframe = document.createElement('iframe');
         iframe.style.position = 'absolute';
@@ -461,7 +441,6 @@ export default function RelatoriosScreen() {
         }, 500);
 
       } else {
-        // No ANDROID / iOS:
         const { uri } = await Print.printToFileAsync({ html: htmlCompleto });
         await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
       }

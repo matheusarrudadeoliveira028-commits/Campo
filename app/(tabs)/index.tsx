@@ -26,7 +26,6 @@ const confirmacaoWebMobile = (titulo: string, mensagem: string, aoConfirmar: () 
   }
 };
 
-// 🟢 FUNÇÃO BLINDADA: Evita tela branca (crash) convertendo de forma segura qualquer tipo de dado
 const converterParaNumero = (valor: any): number => {
   if (valor === null || valor === undefined || valor === '') return 0;
   const valorFormatado = String(valor).replace(',', '.');
@@ -88,14 +87,16 @@ export default function HomeScreen() {
   
   const [isOffline, setIsOffline] = useState(false);
 
-  // Controle de Horário Permitido
-  const [horaInicioPermitida, setHoraInicioPermitida] = useState('06:00');
-  const [horaFimPermitida, setHoraFimPermitida] = useState('23:00');
+  const [horaInicioPermitida, setHoraInicioPermitida] = useState('07:00');
+  const [horaFimPermitida, setHoraFimPermitida] = useState('20:30');
 
-  // ESTADOS DE EDIÇÃO
   const [modalPendentesVisivel, setModalPendentesVisivel] = useState(false);
   const [indexEdicao, setIndexEdicao] = useState<number | null>(null);
   const [dataOriginalEdicao, setDataOriginalEdicao] = useState<string | null>(null);
+
+  // 🟢 NOVA TRAVA: Detecta se é Diária ou Carregamento
+  const nomeServicoLowerCase = servicoSelecionadoCompleto?.nome?.toLowerCase() || '';
+  const isSemLocal = nomeServicoLowerCase.includes('diária') || nomeServicoLowerCase.includes('diaria') || nomeServicoLowerCase.includes('carregamento');
 
   useFocusEffect(
     useCallback(() => {
@@ -163,9 +164,9 @@ export default function HomeScreen() {
       if (errColab || errServ || errMapa) throw new Error("Sem rede");
 
       if (config) {
-        setHoraInicioPermitida(config.hora_inicio);
-        setHoraFimPermitida(config.hora_fim);
-        await AsyncStorage.setItem('@config_horarios', JSON.stringify({ inicio: config.hora_inicio, fim: config.hora_fim }));
+        setHoraInicioPermitida('07:00');
+        setHoraFimPermitida('20:30');
+        await AsyncStorage.setItem('@config_horarios', JSON.stringify({ inicio: '07:00', fim: '20:30' }));
       }
 
       if (colabs) {
@@ -176,7 +177,6 @@ export default function HomeScreen() {
       if (mapa) {
         setMapaCompleto(mapa);
         
-        // Ordena as fazendas disponíveis
         const fazendasUnicas = [...new Set(mapa.map(item => item.fazenda))] as string[];
         fazendasUnicas.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
         setFazendasDisponiveis(fazendasUnicas);
@@ -366,8 +366,15 @@ export default function HomeScreen() {
   };
 
   const salvarLancamento = async () => {
-    if (!colaborador || !servico || !fazenda || !quadra || ramaisSelecionados.length === 0 || !quantidade) { 
-      return Alert.alert("Aviso", "Preencha todos os campos!"); 
+    // 🟢 Validação adaptada para ignorar Fazenda, Quadra e Ramal se for Diária/Carregamento
+    if (!colaborador || !servico || !quantidade) { 
+      return Alert.alert("Aviso", "Preencha os campos obrigatórios!"); 
+    }
+
+    if (!isSemLocal) {
+      if (!fazenda || !quadra || ramaisSelecionados.length === 0) {
+        return Alert.alert("Aviso", "Preencha a Fazenda, Quadra e selecione o Ramal!");
+      }
     }
     
     const dataMomento = new Date();
@@ -382,24 +389,26 @@ export default function HomeScreen() {
       return Alert.alert("🚫 Fora do Expediente", `Permitido apenas entre ${horaInicioPermitida} e ${horaFimPermitida}.`);
     }
 
-    for (let r of ramaisSelecionados) {
-      const ramalInfo = mapaCompleto.find(m => 
-        m.fazenda === fazenda && 
-        m.quadra === quadra && 
-        String(m.ramal).trim().toUpperCase() === String(r).trim().toUpperCase()
-      );
-      if (!ramalInfo) {
-        return Alert.alert("❌ Erro", `O ramal ${r} não foi encontrado no mapa desta fazenda e quadra.`);
-      }
-      if (ramalInfo.data_bloqueio) {
-        const hojeISO = dataMomento.toISOString().split('T')[0];
-        if (hojeISO !== ramalInfo.data_bloqueio) { 
-          return Alert.alert("📅 Data Bloqueada", `Ramal ${r} permitido apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
+    // Só valida bloqueio de ramal se NÃO for diária/carregamento
+    if (!isSemLocal) {
+      for (let r of ramaisSelecionados) {
+        const ramalInfo = mapaCompleto.find(m => 
+          m.fazenda === fazenda && 
+          m.quadra === quadra && 
+          String(m.ramal).trim().toUpperCase() === String(r).trim().toUpperCase()
+        );
+        if (!ramalInfo) {
+          return Alert.alert("❌ Erro", `O ramal ${r} não foi encontrado no mapa desta fazenda e quadra.`);
+        }
+        if (ramalInfo.data_bloqueio) {
+          const hojeISO = dataMomento.toISOString().split('T')[0];
+          if (hojeISO !== ramalInfo.data_bloqueio) { 
+            return Alert.alert("📅 Data Bloqueada", `Ramal ${r} permitido apenas em: ${new Date(ramalInfo.data_bloqueio + 'T00:00:00').toLocaleDateString('pt-BR')}`); 
+          }
         }
       }
     }
 
-    // 🟢 ATUALIZAÇÃO 1: Validação numérica inteligente e bloqueio de negativo/zero
     const qtdNumerica = converterParaNumero(quantidade);
 
     if (qtdNumerica <= 0) {
@@ -422,9 +431,9 @@ export default function HomeScreen() {
       const novoLancamento = {
         colaborador, 
         servico: nomeServicoFinalParaOBanco, 
-        fazenda, 
-        quadra, 
-        ramal: numRamalFinal, 
+        fazenda: isSemLocal ? '-' : fazenda, 
+        quadra: isSemLocal ? '-' : quadra, 
+        ramal: isSemLocal ? '-' : numRamalFinal, 
         quantidade: qtdNumerica, 
         valor_unitario: valorUnitario, 
         valor_total: valorTotalCalculado, 
@@ -459,7 +468,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🟢 ATUALIZAÇÃO 2: Sincronização Cirúrgica Protegida contra quedas parciais de rede
   const sincronizarComBanco = async () => {
     if (lancamentosPendentes.length === 0) return;
     setSincronizando(true);
@@ -598,27 +606,30 @@ export default function HomeScreen() {
                   </Picker>
                 </View>
 
-                <View style={styles.row}>
-                  <View style={styles.col}>
-                    <Text style={styles.label}>Fazenda:</Text>
-                    <View style={styles.pickerContainer}>
-                      <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
-                        <Picker.Item label="..." value="" />
-                        {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
-                      </Picker>
+                {/* 🟢 Esconde Fazenda e Quadra caso seja Diária/Carregamento */}
+                {!isSemLocal && (
+                  <View style={styles.row}>
+                    <View style={styles.col}>
+                      <Text style={styles.label}>Fazenda:</Text>
+                      <View style={styles.pickerContainer}>
+                        <Picker selectedValue={fazenda} onValueChange={setFazenda} style={styles.picker}>
+                          <Picker.Item label="..." value="" />
+                          {fazendasDisponiveis.map((f, i) => (<Picker.Item key={i} label={f} value={f} />))}
+                        </Picker>
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.col}>
-                    <Text style={styles.label}>Quadra:</Text>
-                    <View style={[styles.pickerContainer, !fazenda && styles.disabled]}>
-                      <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
-                        <Picker.Item label="..." value="" />
-                        {quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}
-                      </Picker>
+                    <View style={styles.col}>
+                      <Text style={styles.label}>Quadra:</Text>
+                      <View style={[styles.pickerContainer, !fazenda && styles.disabled]}>
+                        <Picker enabled={!!fazenda} selectedValue={quadra} onValueChange={setQuadra} style={styles.picker}>
+                          <Picker.Item label="..." value="" />
+                          {quadrasDisponiveis.map((q, i) => (<Picker.Item key={i} label={q} value={q} />))}
+                        </Picker>
+                      </View>
                     </View>
                   </View>
-                </View>
+                )}
 
                 <Text style={styles.label}>Serviço Feito:</Text>
                 <View style={styles.pickerContainer}>
@@ -641,48 +652,54 @@ export default function HomeScreen() {
                   </>
                 )}
 
-                <Text style={styles.label}>Ramal:</Text>
-                {!quadra ? (
-                  <Text style={styles.textoDica}>Selecione a quadra primeiro para carregar os ramais.</Text>
-                ) : (
-                  <View>
-                    {permiteMultiplosRamais && (
-                      <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 5}}>
-                        <TouchableOpacity onPress={selecionarTodosRamais} style={styles.btnSelecionarTodos}>
-                          <Text style={styles.btnSelecionarTodosText}>✓ Todos da Quadra</Text>
-                        </TouchableOpacity>
+                {/* 🟢 Esconde os Ramais caso seja Diária/Carregamento */}
+                {!isSemLocal && (
+                  <>
+                    <Text style={styles.label}>Ramal:</Text>
+                    {!quadra ? (
+                      <Text style={styles.textoDica}>Selecione a quadra primeiro para carregar os ramais.</Text>
+                    ) : (
+                      <View>
+                        {permiteMultiplosRamais && (
+                          <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 5}}>
+                            <TouchableOpacity onPress={selecionarTodosRamais} style={styles.btnSelecionarTodos}>
+                              <Text style={styles.btnSelecionarTodosText}>✓ Todos da Quadra</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                        
+                        <View style={styles.chipsContainer}>
+                          {ramaisDisponiveis.map((r, i) => {
+                            const rStr = String(r.ramal);
+                            const selecionado = ramaisSelecionados.includes(rStr);
+                            return (
+                              <TouchableOpacity 
+                                key={i} 
+                                style={[styles.chip, selecionado && styles.chipSelecionado]} 
+                                onPress={() => toggleRamal(rStr)}
+                              >
+                                <Text style={[styles.chipText, selecionado && styles.chipTextSelecionado]}>{rStr}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
                       </View>
                     )}
-                    
-                    <View style={styles.chipsContainer}>
-                      {ramaisDisponiveis.map((r, i) => {
-                        const rStr = String(r.ramal);
-                        const selecionado = ramaisSelecionados.includes(rStr);
-                        return (
-                          <TouchableOpacity 
-                            key={i} 
-                            style={[styles.chip, selecionado && styles.chipSelecionado]} 
-                            onPress={() => toggleRamal(rStr)}
-                          >
-                            <Text style={[styles.chipText, selecionado && styles.chipTextSelecionado]}>{rStr}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
+                  </>
                 )}
 
                 <Text style={styles.label}>Quantidade Total (no lote selecionado):</Text>
                 <TextInput 
-                  style={[styles.inputQuantidade, ramaisSelecionados.length === 0 && styles.disabledInput]} 
+                  // 🟢 O campo só fica desabilitado se não for serviço sem local E não tiver ramal
+                  style={[styles.inputQuantidade, (ramaisSelecionados.length === 0 && !isSemLocal) && styles.disabledInput]} 
                   placeholder="Ex: 50" 
                   keyboardType="decimal-pad" 
                   value={quantidade} 
                   onChangeText={handleMudancaQuantidade} 
-                  editable={ramaisSelecionados.length > 0} 
+                  editable={ramaisSelecionados.length > 0 || isSemLocal} 
                 />
 
-                {limitePes !== null && (
+                {limitePes !== null && !isSemLocal && (
                   <TouchableOpacity 
                     style={styles.btnAutoPreencher} 
                     onPress={() => handleMudancaQuantidade(String(limitePes))}
@@ -827,7 +844,6 @@ const styles = StyleSheet.create({
   inputQuantidade: { borderWidth: 1, borderColor: '#E0E6ED', borderRadius: 8, padding: 12, fontSize: 18, backgroundColor: '#F8FAFC', height: 50 },
   disabledInput: { backgroundColor: '#EAECEE' },
   
-  // 🟢 ESTILO NOVO: BOTÃO DE PREENCHIMENTO AUTOMÁTICO 
   btnAutoPreencher: { backgroundColor: '#E8F8F5', padding: 12, borderRadius: 8, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#27AE60', borderStyle: 'dashed' },
   btnAutoPreencherTexto: { color: '#27AE60', fontWeight: 'bold', fontSize: 13 },
   
