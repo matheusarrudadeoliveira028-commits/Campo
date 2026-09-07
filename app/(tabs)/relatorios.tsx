@@ -89,11 +89,6 @@ export default function RelatoriosScreen() {
     return `${y}-${m}-${d}`;
   };
 
-  const limparNome = (nome: string) => {
-    if (!nome) return '';
-    return nome.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
-  };
-
   const extrairAdmissaoISO = (admStr: any) => {
     if (!admStr) return null;
     let limpa = String(admStr).split('T')[0].split(' ')[0].trim();
@@ -158,16 +153,15 @@ export default function RelatoriosScreen() {
         }
       } catch (imgErr) {}
 
+      // Busca todos os lançamentos
       let query = supabase.from('diarios_campo').select('*')
         .gte('data', `${dtInicioBD} 00:00:00`)
-        .lte('data', `${dtFimBD} 23:59:59`)
-        .order('data', { ascending: true });
-
+        .lte('data', `${dtFimBD} 23:59:59`);
       if (colaboradorSelecionado !== 'TODOS') query = query.eq('colaborador', colaboradorSelecionado);
-      
       const { data: lancamentos, error: errLanc } = await query;
       if (errLanc) throw errLanc;
 
+      // Busca atestados anteriores
       const pIniBusca = dtInicioBD.split('-');
       const dataMenos60 = new Date(parseInt(pIniBusca[0], 10), parseInt(pIniBusca[1], 10) - 1, parseInt(pIniBusca[2], 10) - 60);
       const dataMenos60Str = formatarDataIso(dataMenos60);
@@ -176,58 +170,51 @@ export default function RelatoriosScreen() {
         .eq('servico', 'Atestado')
         .gte('data', `${dataMenos60Str} 00:00:00`)
         .lt('data', `${dtInicioBD} 00:00:00`);
-
       if (colaboradorSelecionado !== 'TODOS') queryAtestados = queryAtestados.eq('colaborador', colaboradorSelecionado);
-      
       const { data: atestadosAnteriores } = await queryAtestados;
 
       const todosRegistros = [...(lancamentos || []), ...(atestadosAnteriores || [])];
-
-      if (todosRegistros.length === 0) {
-        setGerando(false);
-        return Alert.alert('Aviso', 'Nenhum lançamento encontrado.');
-      }
-
       const { data: feriasDB } = await supabase.from('ferias').select('*');
 
-      const estaDeFerias = (nome: string, dataLancamento: string) => {
-        const dataFormatada = dataLancamento.split('T')[0];
-        return feriasDB?.some(f => 
-          (f.colaborador_nome === nome || f.colaborador === nome) && 
-          dataFormatada >= f.data_inicio && 
-          dataFormatada <= f.data_fim
-        );
-      };
+      // 🟢 OBTÉM A LISTA DE COLABORADORES QUE SERÃO GERADOS (TODOS OU APENAS 1)
+      let colaboradoresAlvo = [];
+      if (colaboradorSelecionado === 'TODOS') {
+        colaboradoresAlvo = listaColaboradores;
+      } else {
+        colaboradoresAlvo = listaColaboradores.filter(c => c.nome === colaboradorSelecionado);
+      }
 
-      const agrupado = todosRegistros.reduce((acc: any, item: any) => {
-        const tipoFolha = estaDeFerias(item.colaborador, item.data) ? 'Diaria' : 'Registrado';
-        const chaveAgrupamento = `${item.colaborador}_${tipoFolha}`;
+      if (colaboradoresAlvo.length === 0) {
+        setGerando(false);
+        return Alert.alert('Aviso', 'Colaborador não encontrado na base de dados.');
+      }
 
-        if (!acc[chaveAgrupamento]) {
-          acc[chaveAgrupamento] = { nome: item.colaborador, tipo: tipoFolha, registros: [] };
-        }
-        acc[chaveAgrupamento].registros.push(item);
-        return acc;
-      }, {});
-
-      const chavesFolhas = Object.keys(agrupado);
+      // Ordena alfabeticamente
+      colaboradoresAlvo.sort((a, b) => a.nome.localeCompare(b.nome));
+      
       let paginasHTML = '';
 
-      chavesFolhas.forEach((chave, index) => {
-        const folha = agrupado[chave];
+      colaboradoresAlvo.forEach((colabBase, index) => {
+        const nomeColab = colabBase.nome;
         
-        const totalGeral = folha.registros.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (item.valor_total || 0)), 0);
-        const totalQuantidade = folha.registros.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (Number(item.quantidade) || 0)), 0);
+        // Isola os registros apenas deste funcionário (mesmo que seja zero)
+        const registrosDoColab = todosRegistros.filter(r => r.colaborador === nomeColab);
         
-        const encarregadoNome = folha.registros.find((r: any) => r.fiscal_nome)?.fiscal_nome || 'Não Identificado';
+        const totalGeral = registrosDoColab.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (item.valor_total || 0)), 0);
+        const totalQuantidade = registrosDoColab.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (Number(item.quantidade) || 0)), 0);
+        
+        const encarregadoNome = 'RONIVALDO APARECIDO GONSALVES DE SOUZA';
 
-        const nomeLimpoFolha = limparNome(folha.nome);
-        const dadosDoColaborador = listaColaboradores.find(c => limparNome(c.nome) === nomeLimpoFolha);
+        // Checa se o colaborador teve férias cruzando o período do relatório
+        const temFeriasNoPeriodo = feriasDB?.some(f => 
+          (f.colaborador_nome === nomeColab || f.colaborador === nomeColab) && 
+          (dtInicioBD <= f.data_fim && dtFimBD >= f.data_inicio)
+        );
+        const tipoFolha = temFeriasNoPeriodo ? 'Diaria' : 'Registrado';
         
         let dataAdmissaoIsoStr: string | null = null;
-        if (dadosDoColaborador) {
-          dataAdmissaoIsoStr = extrairAdmissaoISO(dadosDoColaborador.data_admissao || dadosDoColaborador.created_at);
-        }
+        const adm = colabBase.data_admissao || colabBase.created_at;
+        dataAdmissaoIsoStr = extrairAdmissaoISO(adm);
 
         let linhasTabela = '';
         const pIni = dtInicioBD.split('-');
@@ -241,7 +228,7 @@ export default function RelatoriosScreen() {
           const diaDaSemana = dataAtualLoop.getDay(); 
           const diaMesStr = isoDate.split('-')[2];
 
-          const registrosProducao = folha.registros.filter((r: any) => 
+          const registrosProducao = registrosDoColab.filter((r: any) => 
             r.data.startsWith(isoDate) && r.servico !== 'Atestado'
           );
 
@@ -261,14 +248,29 @@ export default function RelatoriosScreen() {
 
             Object.values(registrosAgrupados).forEach((item: any) => {
               const ramaisStr = [...new Set(item.ramais)].join(', ') || '-'; 
-              const valorUni = item.valor_unitario ? item.valor_unitario.toFixed(4).replace('.', ',') : '0,00';
+              
+              const nomeServicoUpper = String(item.servico || '').toUpperCase();
+              const isDiaria = nomeServicoUpper.includes('DIÁRIA') || nomeServicoUpper.includes('DIARIA');
+              
+              const valorUni = item.valor_unitario 
+                ? (isDiaria ? item.valor_unitario.toFixed(2) : item.valor_unitario.toFixed(4)).replace('.', ',') 
+                : '0,00';
+
               const valorTot = item.valor_total ? item.valor_total.toFixed(2).replace('.', ',') : '0,00';
               
+              let nomeFazendaFormatado = item.fazenda || '-';
+              if (nomeFazendaFormatado.toUpperCase().includes('DONA NAIA')) {
+                nomeFazendaFormatado = nomeFazendaFormatado.replace(/DONA NAIA/ig, 'NAIA');
+              }
+              if (nomeFazendaFormatado.toUpperCase().includes('DONA LEDA')) {
+                nomeFazendaFormatado = nomeFazendaFormatado.replace(/DONA LEDA/ig, 'LEDA');
+              }
+
               linhasTabela += `
                 <tr>
                   <td>${diaMesStr}</td>
                   <td>${item.servico || '-'}</td>
-                  <td>${item.fazenda || '-'}</td>
+                  <td>${nomeFazendaFormatado}</td>
                   <td>${item.quadra || '-'}</td>
                   <td>${ramaisStr}</td>
                   <td>${item.quantidade || '-'}</td>
@@ -280,29 +282,24 @@ export default function RelatoriosScreen() {
 
           } else {
             
-            const isAtestadoMultiDia = folha.registros.some((r: any) => {
+            const isAtestadoMultiDia = registrosDoColab.some((r: any) => {
               if (r.servico !== 'Atestado') return false;
-              
               const dtIniStr = r.data_atestado || r.data.split('T')[0]; 
               const dias = Number(r.dias_atestado) || 1;
-              
               const dtIniObj = new Date(dtIniStr + 'T12:00:00');
               const dtFimObj = new Date(dtIniObj);
               dtFimObj.setDate(dtFimObj.getDate() + (dias - 1));
-              
               const dtFimStr = formatarDataIso(dtFimObj);
-              
               return isoDate >= dtIniStr && isoDate <= dtFimStr;
             });
 
             const isFeriado = listaFeriadosNacionais.includes(isoDate) || arrayFeriadosManuais.includes(diaMesStr);
             const isFerias = feriasDB?.some((f: any) => 
-              (f.colaborador_nome === folha.nome || f.colaborador === folha.nome) && 
+              (f.colaborador_nome === nomeColab || f.colaborador === nomeColab) && 
               isoDate >= f.data_inicio && isoDate <= f.data_fim
             );
             const isAntesAdmissao = dataAdmissaoIsoStr !== null && (isoDate < dataAdmissaoIsoStr);
             
-            // 🟢 AQUI ESTÁ A MÁGICA: Mudei a ordem. Agora Domingo, Sábado e Feriado vencem o Atestado.
             if (isAntesAdmissao) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F4F6F6;"></td></tr>`;
             } else if (isFerias) {
@@ -314,7 +311,6 @@ export default function RelatoriosScreen() {
             } else if (diaDaSemana === 6) {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EBF5FB; color: #2980B9; font-weight: bold; letter-spacing: 2px;">SÁBADO</td></tr>`;
             } else if (isAtestadoMultiDia) {
-              // Atestado só vai aparecer nos dias de semana agora (Segunda a Sexta)
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #D6EAF8; color: #2874A6; font-weight: bold; letter-spacing: 2px;">ATESTADO MÉDICO</td></tr>`;
             } else {
               linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FDEDEC; color: #E74C3C; font-weight: bold; letter-spacing: 2px;">FALTA</td></tr>`;
@@ -330,8 +326,8 @@ export default function RelatoriosScreen() {
               <div class="header-left">
                 <p>Período: <strong>${dataInicio} até ${dataFim}</strong></p>
                 <p>Encarregado: <strong style="text-transform: uppercase;">${encarregadoNome}</strong></p>
-                ${folha.tipo === 'Registrado' ? '' : `<p>Produção: <strong style="color: #E74C3C; text-transform: uppercase;">${folha.tipo}</strong></p>`}
-                <p>Colaborador: <strong style="font-size: 16px; text-transform: uppercase;">${folha.nome}</strong></p>
+                ${tipoFolha === 'Registrado' ? '' : `<p>Produção: <strong style="color: #E74C3C; text-transform: uppercase;">${tipoFolha}</strong></p>`}
+                <p>Colaborador: <strong style="font-size: 16px; text-transform: uppercase;">${nomeColab}</strong></p>
               </div>
               <div class="header-right">
                 <p><strong>Luiz Felipe Areovaldo Calhim Manoel Abud</strong></p>
@@ -369,7 +365,6 @@ export default function RelatoriosScreen() {
                 <p style="margin-top: 40px; font-size: 12px; font-style: italic;">declaro ter recebido os valores acima</p>
               </div>
               <div class="footer-totals">
-                <p style="font-size: 15px; margin-bottom: 8px;">Total Produzido: <strong>${totalQuantidade}</strong></p>
                 <p style="font-size: 18px;">A receber: <strong>R$ ${totalGeral.toFixed(2).replace('.', ',')}</strong></p>
               </div>
             </div>
@@ -379,7 +374,7 @@ export default function RelatoriosScreen() {
               <p style="font-size: 14px; font-weight: bold;">Assinatura do Colaborador</p>
             </div>
           </div>
-          ${index < chavesFolhas.length - 1 ? '<div class="quebra-pagina"></div>' : ''}
+          ${index < colaboradoresAlvo.length - 1 ? '<div class="quebra-pagina"></div>' : ''}
         `;
 
         paginasHTML += pagina;
@@ -389,7 +384,7 @@ export default function RelatoriosScreen() {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Relatório de Produção - ${colaboradorSelecionado}</title>
+            <title>Relatório de Produção</title>
             <style>
               @page { margin: 15mm; size: A4; }
               body { font-family: 'Arial', sans-serif; font-size: 13px; color: #000; background-color: #FFF; margin: 0; padding: 0; }
