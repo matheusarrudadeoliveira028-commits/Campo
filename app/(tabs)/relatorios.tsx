@@ -96,22 +96,27 @@ export default function RelatoriosScreen() {
     if (limpa.includes('/')) {
       const p = limpa.split('/');
       if (p.length === 3) {
-          if (p[2].length >= 4) { a = parseInt(p[2], 10); m = parseInt(p[1], 10); d = parseInt(p[0], 10); }
-          else { a = parseInt(p[0], 10); m = parseInt(p[1], 10); d = parseInt(p[2], 10); }
+        if (p[2].length >= 4) { a = parseInt(p[2], 10); m = parseInt(p[1], 10); d = parseInt(p[0], 10); }
+        else { a = parseInt(p[0], 10); m = parseInt(p[1], 10); d = parseInt(p[2], 10); }
       }
     } else if (limpa.includes('-')) {
-       const p = limpa.split('-');
-       if (p.length === 3) {
-           if (p[0].length >= 4) { a = parseInt(p[0], 10); m = parseInt(p[1], 10); d = parseInt(p[2], 10); }
-           else { a = parseInt(p[2], 10); m = parseInt(p[1], 10); d = parseInt(p[0], 10); }
-       }
+      const p = limpa.split('-');
+      if (p.length === 3) {
+        if (p[0].length >= 4) { a = parseInt(p[0], 10); m = parseInt(p[1], 10); d = parseInt(p[2], 10); }
+        else { a = parseInt(p[2], 10); m = parseInt(p[1], 10); d = parseInt(p[0], 10); }
+      }
     }
     if (a > 0 && m > 0 && d > 0 && !isNaN(a) && !isNaN(m) && !isNaN(d)) {
-       if (a < 100) a += 2000;
-       return `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (a < 100) a += 2000;
+      return `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     }
     return null;
   };
+
+  // Funções auxiliares para identificar Atestado e Abonado
+  const ehAtestado = (servico: any) => String(servico || '').toUpperCase().includes('ATESTADO');
+  const ehAbonado = (servico: any) => String(servico || '').toUpperCase().includes('ABONAD');
+  const ehAusenciaJustificada = (servico: any) => ehAtestado(servico) || ehAbonado(servico);
 
   const gerarPDF = async () => {
     if (!colaboradorSelecionado) return Alert.alert('Aviso', 'Selecione um colaborador!');
@@ -153,7 +158,7 @@ export default function RelatoriosScreen() {
         }
       } catch (imgErr) {}
 
-      // Busca todos os lançamentos
+      // Busca todos os lançamentos do período
       let query = supabase.from('diarios_campo').select('*')
         .gte('data', `${dtInicioBD} 00:00:00`)
         .lte('data', `${dtFimBD} 23:59:59`);
@@ -161,19 +166,19 @@ export default function RelatoriosScreen() {
       const { data: lancamentos, error: errLanc } = await query;
       if (errLanc) throw errLanc;
 
-      // Busca atestados anteriores
+      // 👉 Busca atestados e abonados anteriores (até 180 dias para trás)
       const pIniBusca = dtInicioBD.split('-');
-      const dataMenos60 = new Date(parseInt(pIniBusca[0], 10), parseInt(pIniBusca[1], 10) - 1, parseInt(pIniBusca[2], 10) - 60);
-      const dataMenos60Str = formatarDataIso(dataMenos60);
+      const dataMenos180 = new Date(parseInt(pIniBusca[0], 10), parseInt(pIniBusca[1], 10) - 1, parseInt(pIniBusca[2], 10) - 180);
+      const dataMenos180Str = formatarDataIso(dataMenos180);
 
-      let queryAtestados = supabase.from('diarios_campo').select('*')
-        .eq('servico', 'Atestado')
-        .gte('data', `${dataMenos60Str} 00:00:00`)
+      let queryAusencias = supabase.from('diarios_campo').select('*')
+        .or('servico.ilike.%atestado%,servico.ilike.%abonad%')
+        .gte('data', `${dataMenos180Str} 00:00:00`)
         .lt('data', `${dtInicioBD} 00:00:00`);
-      if (colaboradorSelecionado !== 'TODOS') queryAtestados = queryAtestados.eq('colaborador', colaboradorSelecionado);
-      const { data: atestadosAnteriores } = await queryAtestados;
+      if (colaboradorSelecionado !== 'TODOS') queryAusencias = queryAusencias.eq('colaborador', colaboradorSelecionado);
+      const { data: ausenciasAnteriores } = await queryAusencias;
 
-      const todosRegistros = [...(lancamentos || []), ...(atestadosAnteriores || [])];
+      const todosRegistros = [...(lancamentos || []), ...(ausenciasAnteriores || [])];
       const { data: feriasDB } = await supabase.from('ferias').select('*');
 
       // 🟢 OBTÉM A LISTA DE COLABORADORES QUE SERÃO GERADOS (TODOS OU APENAS 1)
@@ -200,8 +205,8 @@ export default function RelatoriosScreen() {
         // Isola os registros apenas deste funcionário (mesmo que seja zero)
         const registrosDoColab = todosRegistros.filter(r => r.colaborador === nomeColab);
         
-        const totalGeral = registrosDoColab.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (item.valor_total || 0)), 0);
-        const totalQuantidade = registrosDoColab.reduce((soma: number, item: any) => soma + (item.servico === 'Atestado' ? 0 : (Number(item.quantidade) || 0)), 0);
+        const totalGeral = registrosDoColab.reduce((soma: number, item: any) => soma + (ehAusenciaJustificada(item.servico) ? 0 : (item.valor_total || 0)), 0);
+        const totalQuantidade = registrosDoColab.reduce((soma: number, item: any) => soma + (ehAusenciaJustificada(item.servico) ? 0 : (Number(item.quantidade) || 0)), 0);
         
         const encarregadoNome = 'RONIVALDO APARECIDO GONSALVES DE SOUZA';
 
@@ -229,7 +234,7 @@ export default function RelatoriosScreen() {
           const diaMesStr = isoDate.split('-')[2];
 
           const registrosProducao = registrosDoColab.filter((r: any) => 
-            r.data.startsWith(isoDate) && r.servico !== 'Atestado'
+            r.data.startsWith(isoDate) && !ehAusenciaJustificada(r.servico)
           );
 
           if (registrosProducao.length > 0) {
@@ -282,16 +287,18 @@ export default function RelatoriosScreen() {
 
           } else {
             
-            const isAtestadoMultiDia = registrosDoColab.some((r: any) => {
-              if (r.servico !== 'Atestado') return false;
-              const dtIniStr = r.data_atestado || r.data.split('T')[0]; 
-              const dias = Number(r.dias_atestado) || 1;
+            const verificarPeriodoAusencia = (r: any) => {
+              const dtIniStr = String(r.data_atestado || r.data_abonado || r.data).split('T')[0].split(' ')[0];
+              const dias = Number(r.dias_atestado || r.dias_abonado) || 1;
               const dtIniObj = new Date(dtIniStr + 'T12:00:00');
               const dtFimObj = new Date(dtIniObj);
               dtFimObj.setDate(dtFimObj.getDate() + (dias - 1));
               const dtFimStr = formatarDataIso(dtFimObj);
               return isoDate >= dtIniStr && isoDate <= dtFimStr;
-            });
+            };
+
+            const isAtestadoMultiDia = registrosDoColab.some((r: any) => ehAtestado(r.servico) && verificarPeriodoAusencia(r));
+            const isAbonadoMultiDia = registrosDoColab.some((r: any) => ehAbonado(r.servico) && verificarPeriodoAusencia(r));
 
             const isFeriado = listaFeriadosNacionais.includes(isoDate) || arrayFeriadosManuais.includes(diaMesStr);
             const isFerias = feriasDB?.some((f: any) => 
@@ -300,20 +307,23 @@ export default function RelatoriosScreen() {
             );
             const isAntesAdmissao = dataAdmissaoIsoStr !== null && (isoDate < dataAdmissaoIsoStr);
             
+            // 👉 Todas as ocorrências com fonte preta (#000000) e em negrito (font-weight: bold)
             if (isAntesAdmissao) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F4F6F6;"></td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #F4F6F6; color: #000000; font-weight: bold;"></td></tr>`;
             } else if (isFerias) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FEF9E7; color: #F39C12; font-weight: bold; letter-spacing: 2px;">FÉRIAS</td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FEF9E7; color: #000000; font-weight: bold; letter-spacing: 2px;">FÉRIAS</td></tr>`;
             } else if (isFeriado) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FADBD8; color: #C0392B; font-weight: bold; letter-spacing: 2px;">FERIADO</td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FADBD8; color: #000000; font-weight: bold; letter-spacing: 2px;">FERIADO</td></tr>`;
             } else if (diaDaSemana === 0) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EAEDED; color: #7F8C8D; font-weight: bold; letter-spacing: 2px;">DOMINGO</td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EAEDED; color: #000000; font-weight: bold; letter-spacing: 2px;">DOMINGO</td></tr>`;
             } else if (diaDaSemana === 6) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EBF5FB; color: #2980B9; font-weight: bold; letter-spacing: 2px;">SÁBADO</td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #EBF5FB; color: #000000; font-weight: bold; letter-spacing: 2px;">SÁBADO</td></tr>`;
             } else if (isAtestadoMultiDia) {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #D6EAF8; color: #2874A6; font-weight: bold; letter-spacing: 2px;">ATESTADO MÉDICO</td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #D6EAF8; color: #000000; font-weight: bold; letter-spacing: 2px;">ATESTADO MÉDICO</td></tr>`;
+            } else if (isAbonadoMultiDia) {
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #E8F8F5; color: #000000; font-weight: bold; letter-spacing: 2px;">ABONADO</td></tr>`;
             } else {
-              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FDEDEC; color: #E74C3C; font-weight: bold; letter-spacing: 2px;">FALTA</td></tr>`;
+              linhasTabela += `<tr><td><strong>${diaMesStr}</strong></td><td colspan="7" style="background-color: #FDEDEC; color: #000000; font-weight: bold; letter-spacing: 2px;">FALTA</td></tr>`;
             }
           }
           dataAtualLoop.setDate(dataAtualLoop.getDate() + 1);

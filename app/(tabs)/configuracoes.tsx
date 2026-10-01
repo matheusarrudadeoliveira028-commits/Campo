@@ -149,7 +149,7 @@ export default function ConfiguracoesScreen() {
         {/* SESSÃO DE LOGOUT */}
         <View style={styles.logoutSection}>
           <Text style={styles.logoutNote}>Seu turno acabou? Lembre-se de sincronizar seus dados antes de sair.
-          Agradecemos o uso do Sistema, Versão n° 4. Atualize sempre que Possivel!</Text>
+          Agradecemos o uso do Sistema</Text>
           <TouchableOpacity style={styles.btnSair} onPress={fazerLogout} disabled={saindo}>
              {saindo ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnSairTexto}>ENCERRAR TURNO (SAIR)</Text>}
           </TouchableOpacity>
